@@ -46,15 +46,21 @@ export default function ReceivePage() {
         const skipped = result.skipped ?? 0
         opener?.postMessage({ type: 'siftly:result', imported, skipped }, e.origin)
 
+        // The import already succeeded and was reported; a pipeline hiccup must not
+        // reach the catch below, or the bookmarklet would also download a fallback file.
         let pipeline: 'started' | 'busy' | 'skipped' = 'skipped'
         if (imported > 0) {
-          const cat = await fetch('/api/categorize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          })
-          // 409 = a run is already going; new rows wait for the next run.
-          pipeline = cat.ok ? 'started' : 'busy'
+          try {
+            const cat = await fetch('/api/categorize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: '{}',
+            })
+            // 409 = a run is already going; new rows wait for the next run.
+            pipeline = cat.ok ? 'started' : 'busy'
+          } catch {
+            pipeline = 'busy'
+          }
         }
         setState({ kind: 'done', imported, skipped, pipeline })
       } catch (err) {
@@ -96,7 +102,9 @@ export default function ReceivePage() {
           </p>
           {state.pipeline === 'started' && <p className="text-zinc-400">AI pipeline started.</p>}
           {state.pipeline === 'busy' && (
-            <p className="text-zinc-400">A pipeline run is already in progress; the new items will be processed on the next run.</p>
+            <p className="text-zinc-400">
+              The AI pipeline did not start (a run may already be in progress). New items are processed on the next run.
+            </p>
           )}
           <a href="/categorize" className="inline-block text-indigo-400 hover:underline">View pipeline progress →</a>
         </div>
