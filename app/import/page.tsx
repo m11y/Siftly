@@ -115,18 +115,17 @@ const BOOKMARKLET_SCRIPT = `(async function(){
       urls:(leg.entities&&leg.entities.urls||[]).map(function(u){return u.expanded_url;}).filter(Boolean)});
     btn.textContent='Export '+all.length+' '+label+' \u2192';
   }
-  function isTweetObj(o){return o&&typeof o==='object'&&typeof o.rest_id==='string'&&o.rest_id.length>5&&(o.legacy||o.core);}
+  function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
   function unwrapTweet(t){
     if(!t)return null;
     if(t.__typename==='TweetWithVisibilityResults'||t.__typename==='TweetWithVisibilityResult')return t.tweet||t;
     return t;
   }
   function deepFindTweets(obj,depth){
-    if(!obj||typeof obj!=='object'||depth>12)return;
+    if(!obj||typeof obj!=='object'||depth>16)return;
     if(Array.isArray(obj)){obj.forEach(function(item){deepFindTweets(item,depth+1);});return;}
-    if(obj.tweet_results&&obj.tweet_results.result){var tw=unwrapTweet(obj.tweet_results.result);if(tw)addTweet(tw);}
-    else if(isTweetObj(obj)){addTweet(unwrapTweet(obj));}
-    for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)&&k!=='quoted_status_result'){deepFindTweets(obj[k],depth+1);}}
+    if(isTweetEntry(obj)){var r=obj.content&&obj.content.itemContent&&obj.content.itemContent.tweet_results&&obj.content.itemContent.tweet_results.result;var tw=unwrapTweet(r);if(tw)addTweet(tw);}
+    for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)){deepFindTweets(obj[k],depth+1);}}
   }
   function processData(d){deepFindTweets(d,0);}
   var autoBtn=document.createElement('button');
@@ -160,9 +159,19 @@ const BOOKMARKLET_SCRIPT = `(async function(){
       if(all.length>lastCount){stagnant=0;lastCount=all.length;}
       else{
         stagnant++;
-        if(stagnant>=8){
+        // Loading often pauses for many seconds (rate limits, slow fetches);
+        // nudge the timeline up and back down to retrigger loading instead of giving up.
+        if(stagnant%10===0&&stagnant<40){
+          window.scrollTo(0,Math.max(0,document.documentElement.scrollHeight-2600));
+          if(col)col.scrollTo(0,Math.max(0,col.scrollHeight-2600));
+          await sleep(1200);
           window.scrollTo(0,document.documentElement.scrollHeight);
-          await sleep(2000);
+          if(col)col.scrollTo(0,col.scrollHeight);
+          await sleep(3000);
+        }
+        if(stagnant>=40){
+          window.scrollTo(0,document.documentElement.scrollHeight);
+          await sleep(5000);
           if(all.length===lastCount){
             autoScrolling=false;
             autoBtn.textContent='\u2705 Done \u2014 '+all.length+' captured';
@@ -241,18 +250,17 @@ const CONSOLE_SCRIPT = `(async function() {
     });
     btn.textContent = \`Export \${all.length} \${label} →\`;
   }
-  function isTweetObj(o) { return o && typeof o === 'object' && typeof o.rest_id === 'string' && o.rest_id.length > 5 && (o.legacy || o.core); }
+  function isTweetEntry(o) { return !!o && typeof o.entryId === 'string' && o.entryId.startsWith('tweet-'); }
   function unwrapTweet(t) {
     if (!t) return null;
     if (t.__typename === 'TweetWithVisibilityResults' || t.__typename === 'TweetWithVisibilityResult') return t.tweet ?? t;
     return t;
   }
   function deepFindTweets(obj, depth = 0) {
-    if (!obj || typeof obj !== 'object' || depth > 12) return;
+    if (!obj || typeof obj !== 'object' || depth > 16) return;
     if (Array.isArray(obj)) { obj.forEach(item => deepFindTweets(item, depth + 1)); return; }
-    if (obj.tweet_results?.result) { const tw = unwrapTweet(obj.tweet_results.result); if (tw) addTweet(tw); }
-    else if (isTweetObj(obj)) { addTweet(unwrapTweet(obj)); }
-    for (const k of Object.keys(obj)) { if (k !== 'quoted_status_result') deepFindTweets(obj[k], depth + 1); }
+    if (isTweetEntry(obj)) { const tw = unwrapTweet(obj.content?.itemContent?.tweet_results?.result); if (tw) addTweet(tw); }
+    for (const k of Object.keys(obj)) deepFindTweets(obj[k], depth + 1);
   }
   function processData(d) { deepFindTweets(d, 0); }
   const btn = document.createElement('button');
@@ -299,9 +307,19 @@ const CONSOLE_SCRIPT = `(async function() {
       if (all.length > lastCount) { stagnant = 0; lastCount = all.length; }
       else {
         stagnant++;
-        if (stagnant >= 8) {
+        // Loading often pauses for many seconds (rate limits, slow fetches);
+        // nudge the timeline up and back down to retrigger loading instead of giving up.
+        if (stagnant % 10 === 0 && stagnant < 40) {
+          window.scrollTo(0, Math.max(0, document.documentElement.scrollHeight - 2600));
+          col?.scrollTo(0, Math.max(0, col.scrollHeight - 2600));
+          await sleep(1200);
           window.scrollTo(0, document.documentElement.scrollHeight);
-          await sleep(2000);
+          col?.scrollTo(0, col.scrollHeight);
+          await sleep(3000);
+        }
+        if (stagnant >= 40) {
+          window.scrollTo(0, document.documentElement.scrollHeight);
+          await sleep(5000);
           if (all.length === lastCount) {
             autoScrolling = false;
             autoBtn.textContent = \`✅ Done — \${all.length} captured\`;
