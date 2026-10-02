@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { Upload, CheckCircle, ChevronRight, Loader2, Copy, Check, ExternalLink, Sparkles, Eye, Tag, Brain, Layers, StopCircle, RefreshCw, Clock, KeyRound, Trash2, AlertCircle, User, LogOut } from 'lucide-react'
 import * as Progress from '@radix-ui/react-progress'
@@ -68,6 +68,8 @@ const BOOKMARKLET_SCRIPT = `(async function(){
   if(!location.hostname.includes('twitter.com')&&!location.hostname.includes('x.com')){
     showToast('\u274c Please navigate to x.com/i/bookmarks or x.com/username/likes first','#ef4444');return;
   }
+  // Replaced with the Siftly page's own origin when the bookmarklet link is rendered.
+  var SIFTLY='__SIFTLY_ORIGIN__';
   var isLikes=location.pathname.includes('/likes');
   var source=isLikes?'like':'bookmark';
   var label=isLikes?'likes':'bookmarks';
@@ -83,37 +85,19 @@ const BOOKMARKLET_SCRIPT = `(async function(){
   }
   var all=[],seen=new Set();
   var btn=document.createElement('button');
-  btn.textContent='Scroll, then Export 0 '+label+' \u2192';
+  btn.textContent='Scroll, then Send 0 '+label+' to Siftly \u2192';
   Object.assign(btn.style,{position:'fixed',top:'12px',right:'12px',zIndex:'2147483647',
     padding:'10px 18px',background:'#4f46e5',color:'#fff',border:'none',borderRadius:'8px',
     cursor:'pointer',fontSize:'14px',fontWeight:'700',
     boxShadow:'0 0 0 2px rgba(99,102,241,.4),0 4px 16px rgba(0,0,0,.4)',
     fontFamily:'system-ui,sans-serif'});
+  // Keep the raw GraphQL tweet: only it carries the full text of long posts
+  // (note_tweet) and X Articles. Siftly parses it server-side.
   function addTweet(t){
     if(!t||!t.rest_id||seen.has(t.rest_id))return;
     seen.add(t.rest_id);
-    var leg=t.legacy||{},usrRes=(t.core&&t.core.user_results&&t.core.user_results.result)||{};
-    // X moved user fields from user_results.result.legacy to .core — read both
-    var usr=usrRes.legacy||{},usrCore=usrRes.core||{};
-    var rawMedia=(leg.extended_entities&&leg.extended_entities.media)||(leg.entities&&leg.entities.media)||[];
-    var media=rawMedia.map(function(m){
-      var thumb=m.media_url_https||'';
-      if(m.type==='video'||m.type==='animated_gif'){
-        var variants=m.video_info&&m.video_info.variants||[];
-        var mp4s=variants.filter(function(v){return v.content_type==='video/mp4'&&v.url;}).sort(function(a,b){return(b.bitrate||0)-(a.bitrate||0);});
-        if(mp4s.length)return{type:m.type==='animated_gif'?'gif':'video',url:mp4s[0].url};
-        // No mp4 — degrade to photo so thumbnail shows correctly (actual video not available)
-        if(thumb)return{type:'photo',url:thumb};
-        return null;
-      }
-      return thumb?{type:'photo',url:thumb}:null;
-    }).filter(Boolean);
-    all.push({id:t.rest_id,author:usr.name||usrCore.name||'Unknown',handle:'@'+(usr.screen_name||usrCore.screen_name||'unknown'),
-      avatar:usr.profile_image_url_https||(usrRes.avatar&&usrRes.avatar.image_url)||'',timestamp:leg.created_at||'',
-      text:leg.full_text||leg.text||'',media:media,
-      hashtags:(leg.entities&&leg.entities.hashtags||[]).map(function(h){return h.text;}),
-      urls:(leg.entities&&leg.entities.urls||[]).map(function(u){return u.expanded_url;}).filter(Boolean)});
-    btn.textContent='Export '+all.length+' '+label+' \u2192';
+    all.push(t);
+    btn.textContent='Send '+all.length+' '+label+' to Siftly \u2192';
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
   function unwrapTweet(t){
@@ -129,17 +113,45 @@ const BOOKMARKLET_SCRIPT = `(async function(){
   }
   function processData(d){deepFindTweets(d,0);}
   var autoBtn=document.createElement('button');
-  function doExport(){
+  function finish(){
     window.fetch=origFetch;
     XMLHttpRequest.prototype.open=origOpen;
     XMLHttpRequest.prototype.send=origSend;
-    if(!all.length){showToast('\u26a0\ufe0f No '+label+' captured \u2014 scroll or use Auto-scroll first!','#92400e');return;}
     [btn,autoBtn].forEach(function(el){try{document.body.removeChild(el);}catch(e){}});
-    var blob=new Blob([JSON.stringify({bookmarks:all,source:source},null,2)],{type:'application/json'});
+  }
+  // Fallback when the Siftly popup cannot be reached: upload this file on the Import page.
+  function downloadJson(){
+    var blob=new Blob([JSON.stringify({source:source,tweets:all})],{type:'application/json'});
     var url=URL.createObjectURL(blob);
     var a=document.createElement('a');a.href=url;a.download=source+'s.json';a.click();
     setTimeout(function(){URL.revokeObjectURL(url);},1000);
-    showToast('\u2705 Downloaded '+all.length+' '+label+'! Upload to Siftly.','#14532d');
+  }
+  function fallback(msg){
+    finish();downloadJson();
+    showToast(msg+' \u2014 downloaded '+source+'s.json instead; upload it on Siftly\u2019s Import page.','#92400e');
+  }
+  // x.com's CSP blocks fetch() to the local server, so open a Siftly popup and
+  // hand the tweets over with postMessage; the popup imports them same-origin.
+  function doExport(){
+    if(!all.length){showToast('\u26a0\ufe0f No '+label+' captured \u2014 scroll or use Auto-scroll first!','#92400e');return;}
+    var w=window.open(SIFTLY+'/import/receive','siftly-import');
+    if(!w){fallback('\u26a0\ufe0f Popup blocked');return;}
+    var sent=false;
+    var timer=setTimeout(function(){window.removeEventListener('message',onMsg);fallback('\u26a0\ufe0f Siftly at '+SIFTLY+' did not respond');},20000);
+    function onMsg(e){
+      if(e.origin!==SIFTLY||e.source!==w||!e.data)return;
+      if(e.data.type==='siftly:ready'&&!sent){
+        sent=true;clearTimeout(timer);
+        w.postMessage({type:'siftly:import',source:source,tweets:all},SIFTLY);
+        showToast('\u23f3 Sending '+all.length+' '+label+' to Siftly\u2026','#1e1b4b');
+      }else if(e.data.type==='siftly:result'){
+        window.removeEventListener('message',onMsg);
+        if(e.data.error){fallback('\u274c Siftly import failed: '+e.data.error);return;}
+        finish();
+        showToast('\u2705 Siftly imported '+e.data.imported+' new '+label+', '+e.data.skipped+' already saved','#14532d');
+      }
+    }
+    window.addEventListener('message',onMsg);
   }
   btn.onclick=doExport;
   autoBtn.textContent='\u25b6 Auto-scroll';
@@ -176,7 +188,7 @@ const BOOKMARKLET_SCRIPT = `(async function(){
             autoScrolling=false;
             autoBtn.textContent='\u2705 Done \u2014 '+all.length+' captured';
             autoBtn.style.background='#14532d';autoBtn.style.color='#86efac';autoBtn.style.border='1px solid #166534';
-            showToast('\u2705 Auto-scroll complete! '+all.length+' '+label+' ready. Click Export.','#14532d');
+            showToast('\u2705 Auto-scroll complete! '+all.length+' '+label+' ready. Click Send.','#14532d');
             return;
           }
           stagnant=0;
@@ -215,7 +227,13 @@ const BOOKMARKLET_SCRIPT = `(async function(){
   showToast('\u2705 Active! Scroll your '+label+' \u2014 counter updates above.','#1e1b4b');
 })();`
 
-const BOOKMARKLET_HREF = `javascript:${encodeURIComponent(BOOKMARKLET_SCRIPT)}`
+function noopSubscribe(): () => void {
+  return () => {}
+}
+
+function bookmarkletHref(siftlyOrigin: string): string {
+  return `javascript:${encodeURIComponent(BOOKMARKLET_SCRIPT.replace('__SIFTLY_ORIGIN__', siftlyOrigin))}`
+}
 
 const CONSOLE_SCRIPT = `(async function() {
   if (!location.hostname.includes('twitter.com') && !location.hostname.includes('x.com')) {
@@ -382,7 +400,7 @@ function DraggableBookmarklet() {
 
   useEffect(() => {
     // Set href imperatively — bypasses React's javascript: URL XSS guard
-    linkRef.current?.setAttribute('href', BOOKMARKLET_HREF)
+    linkRef.current?.setAttribute('href', bookmarkletHref(window.location.origin))
   }, [])
 
   return (
@@ -481,6 +499,9 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
   const targetUrl = importSource === 'like' ? 'https://x.com' : 'https://x.com/i/bookmarks'
   const targetLabel = importSource === 'like' ? 'x.com/YourUsername/likes' : 'x.com/i/bookmarks'
   const sourceLabel = importSource === 'like' ? 'likes' : 'bookmarks'
+  // Embeds window.location.origin, which is only known on the client.
+  const siftlyOrigin = useSyncExternalStore(noopSubscribe, () => window.location.origin, () => '')
+  const manualHref = siftlyOrigin ? bookmarkletHref(siftlyOrigin) : ''
   const steps = [
     {
       num: 1,
@@ -508,7 +529,7 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
                 <li>2. Right-click bookmark bar → <strong className="text-zinc-400">Add bookmark / New bookmark</strong></li>
                 <li>3. Name it <em className="text-zinc-400">Export X Bookmarks</em> and paste the URL</li>
               </ol>
-              <CopyButton text={BOOKMARKLET_HREF} />
+              <CopyButton text={manualHref} />
             </div>
           </div>
         </div>
@@ -536,7 +557,7 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
       title: `Click "Export X Bookmarks" in your bookmark bar`,
       content: (
         <p className="text-xs text-zinc-500 mt-1">
-          A purple Export button will appear on the page
+          A purple Send button will appear on the page
         </p>
       ),
     },
@@ -545,17 +566,18 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
       title: 'Click "▶ Auto-scroll" to capture all bookmarks automatically',
       content: (
         <p className="text-xs text-zinc-500 mt-1">
-          A second button appears below the export button. Click it and it will scroll through all your bookmarks automatically — stopping when done. Or scroll manually if you prefer.
+          A second button appears below the Send button. Click it and it will scroll through all your bookmarks automatically — stopping when done. Or scroll manually if you prefer.
         </p>
       ),
     },
     {
       num: 5,
-      title: `Click the purple "Export N ${sourceLabel}" button`,
+      title: `Click the purple "Send N ${sourceLabel} to Siftly" button`,
       content: (
         <p className="text-xs text-zinc-500 mt-1">
-          A <code className="text-xs bg-zinc-800 px-1 py-0.5 rounded">{sourceLabel}.json</code> file will download automatically.
-          Upload it below.
+          A Siftly window opens and imports them directly, then starts the AI pipeline. If that window is blocked or
+          Siftly is unreachable, a <code className="text-xs bg-zinc-800 px-1 py-0.5 rounded">{sourceLabel}.json</code>{' '}
+          file downloads instead — upload it below.
         </p>
       ),
     },
@@ -578,7 +600,7 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
       </ol>
 
       <div className="border-t border-zinc-800 pt-5">
-        <p className="text-xs text-zinc-500 mb-3 uppercase tracking-wider font-medium">Upload the downloaded file</p>
+        <p className="text-xs text-zinc-500 mb-3 uppercase tracking-wider font-medium">Or upload a downloaded file</p>
         <UploadZone onFile={onFile} />
       </div>
     </div>

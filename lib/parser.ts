@@ -287,6 +287,94 @@ function convertSiftlyExportRow(row: SiftlyExportItem): RawTweet {
   }
 }
 
+// ── X web GraphQL tweet objects (tweet_results.result) ─────────────────────────
+// Sent by the bookmarklet as { source, tweets: [...] }. Unlike the flattened
+// export rows, these keep the fields that carry a post's complete text.
+
+interface GraphqlUser {
+  legacy?: { screen_name?: string; name?: string }
+  core?: { screen_name?: string; name?: string }
+}
+
+interface GraphqlArticle {
+  title?: string
+  preview_text?: string
+  content?: string
+  preview_image?: { url?: string }
+  cover_media?: { media_info?: { original_img_url?: string } }
+}
+
+export interface GraphqlTweet {
+  __typename?: string
+  rest_id?: string
+  tweet?: GraphqlTweet
+  legacy?: {
+    full_text?: string
+    created_at?: string
+    entities?: TwitterEntities
+    extended_entities?: { media?: TwitterMediaEntity[] }
+  }
+  core?: { user_results?: { result?: GraphqlUser } }
+  note_tweet?: { note_tweet_results?: { result?: { text?: string } } }
+  article?: { article_results?: { result?: GraphqlArticle } }
+}
+
+function graphqlFullText(tweet: GraphqlTweet): string {
+  // Posts over 280 chars keep only a truncated prefix in legacy.full_text;
+  // the complete text lives in note_tweet.
+  const note = tweet.note_tweet?.note_tweet_results?.result?.text
+  if (note) return note
+
+  const article = tweet.article?.article_results?.result
+  if (article) {
+    const body = article.content ?? article.preview_text
+    const parts = [article.title, body].filter((p): p is string => !!p)
+    if (parts.length > 0) return parts.join('\n\n')
+  }
+
+  return tweet.legacy?.full_text ?? ''
+}
+
+function graphqlMedia(tweet: GraphqlTweet): ParsedMedia[] {
+  const media = extractMedia({
+    extended_entities: tweet.legacy?.extended_entities,
+    entities: tweet.legacy?.entities,
+  })
+  if (media.length > 0) return media
+
+  const article = tweet.article?.article_results?.result
+  const cover = article?.cover_media?.media_info?.original_img_url ?? article?.preview_image?.url
+  return cover ? [{ type: 'photo', url: cover, thumbnailUrl: cover }] : []
+}
+
+export function parseGraphqlTweet(raw: GraphqlTweet): ParsedBookmark | null {
+  const tweet = raw.__typename?.startsWith('TweetWithVisibilityResult') && raw.tweet ? raw.tweet : raw
+  if (!tweet.rest_id) return null
+
+  // X moved name/screen_name from user_results.result.legacy to .core; read both.
+  const user = tweet.core?.user_results?.result
+  const createdAt = tweet.legacy?.created_at ? new Date(tweet.legacy.created_at) : null
+
+  return {
+    tweetId: tweet.rest_id,
+    text: graphqlFullText(tweet),
+    authorHandle: user?.core?.screen_name ?? user?.legacy?.screen_name ?? 'unknown',
+    authorName: user?.core?.name ?? user?.legacy?.name ?? 'Unknown',
+    tweetCreatedAt: createdAt && !isNaN(createdAt.getTime()) ? createdAt : null,
+    hashtags: extractHashtags({ entities: tweet.legacy?.entities }),
+    urls: extractUrls({ entities: tweet.legacy?.entities }),
+    media: graphqlMedia(tweet),
+    rawJson: JSON.stringify(tweet),
+  }
+}
+
+function isGraphqlExportFormat(obj: unknown): obj is { tweets: GraphqlTweet[] } {
+  if (typeof obj !== 'object' || obj === null) return false
+  const tweets = (obj as Record<string, unknown>).tweets
+  return Array.isArray(tweets) && tweets.length > 0 &&
+    typeof tweets[0] === 'object' && tweets[0] !== null && 'rest_id' in tweets[0]
+}
+
 function normalizeTweetArray(parsed: unknown): RawTweet[] {
   // Console script export format: { exportDate, totalBookmarks, bookmarks: [...] }
   if (isConsoleExportFormat(parsed)) {
@@ -329,6 +417,12 @@ export function parseBookmarksJson(jsonString: string): ParsedBookmark[] {
     parsed = JSON.parse(jsonString)
   } catch (err) {
     throw new Error(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  if (isGraphqlExportFormat(parsed)) {
+    return parsed.tweets
+      .map(parseGraphqlTweet)
+      .filter((b): b is ParsedBookmark => b !== null)
   }
 
   const tweets = normalizeTweetArray(parsed)
