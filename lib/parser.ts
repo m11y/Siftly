@@ -300,12 +300,58 @@ interface GraphqlUser {
   core?: { screen_name?: string; name?: string }
 }
 
+// X Article bodies are Draft.js content. Timelines send only title + preview_text;
+// the article/detail page also sends content_state (the full body) and the inline
+// images in media_entities.
+interface DraftEntity { key?: string | number; value?: { type?: string; data?: { url?: string; caption?: string } } }
+interface DraftBlock { type?: string; text?: string; entityRanges?: { key: number; offset: number; length: number }[] }
+
 interface GraphqlArticle {
   title?: string
   preview_text?: string
   content?: string
+  content_state?: { blocks?: DraftBlock[]; entityMap?: DraftEntity[] | Record<string, DraftEntity['value']> }
   preview_image?: { url?: string }
   cover_media?: { media_info?: { original_img_url?: string } }
+  media_entities?: { media_info?: { original_img_url?: string } }[]
+}
+
+/** True when the tweet carries an X Article's full body, not just its preview. */
+export function hasArticleBody(tweet: GraphqlTweet): boolean {
+  return !!tweet.article?.article_results?.result?.content_state?.blocks?.length
+}
+
+/**
+ * Plain text of a Draft.js article body: one paragraph per block. Image blocks
+ * contribute their caption (the image itself becomes a media item); a link keeps
+ * its anchor text and gets the URL appended when the text doesn't already show it.
+ */
+export function articleBodyText(state: NonNullable<GraphqlArticle['content_state']>): string {
+  const raw = state.entityMap ?? []
+  const entities = new Map<string, DraftEntity['value']>(
+    Array.isArray(raw) ? raw.map((e) => [String(e.key), e.value]) : Object.entries(raw),
+  )
+  const paragraphs: string[] = []
+  for (const block of state.blocks ?? []) {
+    const ranges = block.entityRanges ?? []
+    if (block.type === 'atomic') {
+      const caption = ranges.map((r) => entities.get(String(r.key))?.data?.caption).find(Boolean)
+      if (caption) paragraphs.push(caption)
+      continue
+    }
+    let text = block.text ?? ''
+    // Insert link URLs from the end so earlier offsets stay valid.
+    for (const r of [...ranges].sort((a, b) => b.offset - a.offset)) {
+      const e = entities.get(String(r.key))
+      const url = e?.type === 'LINK' ? e.data?.url : undefined
+      if (url && !text.includes(url)) {
+        const end = r.offset + r.length
+        text = `${text.slice(0, end)} (${url})${text.slice(end)}`
+      }
+    }
+    if (text.trim()) paragraphs.push(text)
+  }
+  return paragraphs.join('\n\n')
 }
 
 export interface GraphqlTweet {
@@ -333,7 +379,9 @@ function graphqlFullText(tweet: GraphqlTweet): string {
 
   const article = tweet.article?.article_results?.result
   if (article) {
-    const body = article.content ?? article.preview_text
+    const body = article.content_state?.blocks?.length
+      ? articleBodyText(article.content_state)
+      : article.content ?? article.preview_text
     const parts = [article.title, body].filter((p): p is string => !!p)
     if (parts.length > 0) return parts.join('\n\n')
   }
@@ -348,9 +396,12 @@ function graphqlMedia(tweet: GraphqlTweet): ParsedMedia[] {
   })
   if (media.length > 0) return media
 
+  // Articles: the cover, then the images inside the body (full body only).
   const article = tweet.article?.article_results?.result
   const cover = article?.cover_media?.media_info?.original_img_url ?? article?.preview_image?.url
-  return cover ? [{ type: 'photo', url: cover, thumbnailUrl: cover }] : []
+  const inline = (article?.media_entities ?? []).map((m) => m.media_info?.original_img_url)
+  const urls = [...new Set([cover, ...inline].filter((u): u is string => !!u))]
+  return urls.map((url) => ({ type: 'photo' as const, url, thumbnailUrl: url }))
 }
 
 export function parseGraphqlTweet(raw: GraphqlTweet): ParsedBookmark | null {

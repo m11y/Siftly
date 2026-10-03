@@ -6,7 +6,7 @@ import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
 import MediaLightbox, { type LightboxState } from '@/components/media-lightbox'
-import { AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
+import { ArticlePreviewNote, AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
  * Full view of one tweet: complete text with its line breaks, every photo and
@@ -134,6 +134,7 @@ export default function TweetReader({
             </div>
           )}
 
+          {bookmark.articlePreview && <ArticlePreviewNote tweetUrl={tweetUrl} />}
           {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} full onOpenPhotos={(srcs, index) => setLightbox({ srcs, index })} />}
           {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
 

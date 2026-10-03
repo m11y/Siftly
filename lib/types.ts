@@ -29,6 +29,8 @@ export interface BookmarkWithMedia {
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
   links?: TweetLink[]
+  /** X Article with only its preview saved; open it on X (panel on) to fill in the body. */
+  articlePreview?: boolean
   /** Tweet this one quotes; set even when its content is unknown (link to X then). */
   quotedTweetId?: string | null
   quoted?: QuotedTweetView | null

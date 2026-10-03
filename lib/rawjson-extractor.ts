@@ -23,7 +23,7 @@ export interface QuotedTweet {
  * Bump when the extracted shape changes: backfillEntities re-extracts rows whose
  * stored JSON lacks the current marker (rawJson stays the source of truth).
  */
-export const ENTITIES_VERSION = 2
+export const ENTITIES_VERSION = 3
 
 export interface ExtractedEntities {
   v: number
@@ -36,6 +36,8 @@ export interface ExtractedEntities {
   mediaTypes: string[]
   links: TweetLink[]   // t.co → expanded URL, so the UI can show links without resolving t.co
   quoted: QuotedTweet | null
+  /** X Article saved with only its preview (opening it on X with the panel on fills it in). */
+  articlePreview: boolean
 }
 
 const KNOWN_TOOL_DOMAINS: Record<string, string> = {
@@ -200,6 +202,7 @@ export function extractEntities(rawJson: string): ExtractedEntities {
     mediaTypes: [],
     links: [],
     quoted: null,
+    articlePreview: false,
   }
 
   if (!rawJson) return empty
@@ -278,6 +281,8 @@ export function extractEntities(rawJson: string): ExtractedEntities {
     hashtags, urls, mentions, tools, tweetType, hasMedia, mediaTypes,
     links: extractLinks(urlObjs),
     quoted: extractQuoted(t),
+    articlePreview: !!safeGet(t, 'article', 'article_results', 'result') &&
+      !safeGet(t, 'article', 'article_results', 'result', 'content_state', 'blocks')?.length,
   }
 }
 
@@ -308,12 +313,12 @@ function extractQuoted(t: any): QuotedTweet | null {
 }
 
 /** The display-only part of a stored `entities` JSON (links, quoted tweet). */
-export function displayEntities(entitiesJson: string | null): { links: TweetLink[]; quoted: QuotedTweet | null } {
+export function displayEntities(entitiesJson: string | null): { links: TweetLink[]; quoted: QuotedTweet | null; articlePreview: boolean } {
   try {
     const e = entitiesJson ? (JSON.parse(entitiesJson) as Partial<ExtractedEntities>) : {}
-    return { links: e.links ?? [], quoted: e.quoted ?? null }
+    return { links: e.links ?? [], quoted: e.quoted ?? null, articlePreview: e.articlePreview ?? false }
   } catch {
-    return { links: [], quoted: null }
+    return { links: [], quoted: null, articlePreview: false }
   }
 }
 

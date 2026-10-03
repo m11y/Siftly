@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { saveBookmark } from '@/lib/bookmark-store'
+import { completeArticle, saveBookmark } from '@/lib/bookmark-store'
 import { GraphqlTweet, parseGraphqlTweet } from '@/lib/parser'
 
 const ALLOWED_ORIGINS = new Set(['https://x.com', 'https://twitter.com'])
@@ -30,6 +30,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400, headers: cors })
   }
 
+  // 'complete': X Article bodies captured on article pages; update saved rows only.
+  const complete = body.source === 'complete'
   const source = body.source === 'like' ? 'like' : 'bookmark'
   const tweets = body.tweets ?? []
   if (!Array.isArray(tweets) || tweets.length === 0) {
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const bookmark = parseGraphqlTweet(raw)
     if (!bookmark) continue
 
-    const result = await saveBookmark(bookmark, source)
+    const result = complete ? await completeArticle(bookmark) : await saveBookmark(bookmark, source)
     if (result === 'imported') imported++
     else if (result === 'updated') updated++
     else skipped++

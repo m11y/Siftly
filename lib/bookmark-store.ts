@@ -5,7 +5,7 @@
  * filters like any other row, and only its source label differs.
  */
 import prisma from '@/lib/db'
-import { parseGraphqlTweet, type GraphqlTweet, type ParsedBookmark } from '@/lib/parser'
+import { hasArticleBody, parseGraphqlTweet, type GraphqlTweet, type ParsedBookmark } from '@/lib/parser'
 
 export type BookmarkSource = 'bookmark' | 'like' | 'quote'
 
@@ -75,13 +75,35 @@ export async function saveBookmark(b: ParsedBookmark, source: BookmarkSource): P
   return 'imported'
 }
 
+function rawHasArticleBody(rawJson: string): boolean {
+  try { return hasArticleBody(JSON.parse(rawJson) as GraphqlTweet) } catch { return false }
+}
+
+/**
+ * Fill in an X Article's full body, captured when the user opened the article on
+ * X (timelines only carry its preview). Only updates a row that is already saved
+ * and still has just the preview — opening an article never creates a bookmark.
+ */
+export async function completeArticle(b: ParsedBookmark): Promise<'updated' | 'skipped'> {
+  if (!rawHasArticleBody(b.rawJson)) return 'skipped'
+  const existing = await prisma.bookmark.findUnique({ where: { tweetId: b.tweetId }, select: { id: true, rawJson: true } })
+  if (!existing || rawHasArticleBody(existing.rawJson)) return 'skipped'
+  await refreshFromGraphql(existing.id, b, undefined, { resetAi: true })
+  return 'updated'
+}
+
 /**
  * Replace an old-format row's tweet data with the GraphQL version. AI results stay:
  * semantic tags, categories and vision on photos whose URL is unchanged. Entities
  * are cleared so the pipeline re-extracts them (links, quote), and the media stage
  * then fetches whatever was missing (avatar, poster, card image).
  */
-async function refreshFromGraphql(id: string, b: ParsedBookmark, source?: BookmarkSource): Promise<void> {
+async function refreshFromGraphql(
+  id: string,
+  b: ParsedBookmark,
+  source?: BookmarkSource,
+  opts: { resetAi?: boolean } = {},
+): Promise<void> {
   const oldMedia = await prisma.mediaItem.findMany({ where: { bookmarkId: id }, select: { id: true, url: true } })
   const newUrls = new Set(b.media.map((m) => m.url))
   const keptByUrl = new Map(oldMedia.filter((m) => newUrls.has(m.url)).map((m) => [m.url, m.id]))
@@ -98,6 +120,8 @@ async function refreshFromGraphql(id: string, b: ParsedBookmark, source?: Bookma
         quotedTweetId: b.quotedTweetId ?? null,
         entities: null,
         ...(source ? { source } : {}),
+        // The text changed substantially (preview → full article): redo tags and categories.
+        ...(opts.resetAi ? { semanticTags: null, enrichmentMeta: null, enrichedAt: null } : {}),
       },
     }),
     prisma.mediaItem.deleteMany({ where: { bookmarkId: id, id: { notIn: [...keptByUrl.values()] } } }),
