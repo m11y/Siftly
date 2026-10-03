@@ -79,9 +79,10 @@ const BOOKMARKLET_SCRIPT = `(function(){
   if(window.__siftlyLive){window.__siftlyLive.reconnect();return;}
   var Z='2147483647';
   // X is a single-page app: capture only while the current page is a likes or bookmarks timeline.
+  // Likes: /i/history/likes (current) or /<user>/likes (older). Bookmarks: /i/bookmarks[/<folder>].
   function pageSource(){
     var parts=location.pathname.split('/').filter(Boolean);
-    if(parts.length===2&&parts[1]==='likes')return 'like';
+    if(parts[parts.length-1]==='likes'&&(parts.length===2||(parts[0]==='i'&&parts[1]==='history')))return 'like';
     if(parts[0]==='i'&&parts[1]==='bookmarks')return 'bookmark';
     return null;
   }
@@ -521,8 +522,8 @@ function UploadZone({ onFile }: { onFile: (file: File) => void }) {
 }
 
 function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void; importSource: 'bookmark' | 'like' }) {
-  const targetUrl = importSource === 'like' ? 'https://x.com' : 'https://x.com/i/bookmarks'
-  const targetLabel = importSource === 'like' ? 'x.com/YourUsername/likes' : 'x.com/i/bookmarks'
+  const targetUrl = importSource === 'like' ? 'https://x.com/i/history/likes' : 'https://x.com/i/bookmarks'
+  const targetLabel = importSource === 'like' ? 'x.com/i/history/likes' : 'x.com/i/bookmarks'
   const sourceLabel = importSource === 'like' ? 'likes' : 'bookmarks'
   // Embeds window.location.origin, which is only known on the client.
   const siftlyOrigin = useSyncExternalStore(noopSubscribe, () => window.location.origin, () => '')
@@ -625,8 +626,8 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
 }
 
 function ConsoleTab({ onFile, importSource }: { onFile: (file: File) => void; importSource: 'bookmark' | 'like' }) {
-  const targetUrl = importSource === 'like' ? 'https://x.com' : 'https://x.com/i/bookmarks'
-  const targetLabel = importSource === 'like' ? 'x.com/YourUsername/likes' : 'x.com/i/bookmarks'
+  const targetUrl = importSource === 'like' ? 'https://x.com/i/history/likes' : 'https://x.com/i/bookmarks'
+  const targetLabel = importSource === 'like' ? 'x.com/i/history/likes' : 'x.com/i/bookmarks'
   const sourceLabel = importSource === 'like' ? 'likes' : 'bookmarks'
   const steps = [
     {
