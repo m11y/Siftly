@@ -14,6 +14,9 @@ export interface BookmarkCategory {
   confidence: number | null
 }
 
+import type { QuotedTweet, TweetLink } from '@/lib/rawjson-extractor'
+export type { QuotedTweet, TweetLink }
+
 export interface BookmarkWithMedia {
   id: string
   tweetId: string
@@ -24,6 +27,8 @@ export interface BookmarkWithMedia {
   importedAt?: string
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
+  links?: TweetLink[]
+  quoted?: QuotedTweet | null
 }
 
 export interface Category {
