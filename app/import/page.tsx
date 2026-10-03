@@ -87,7 +87,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     return null;
   }
   var seen=new Set(),queue=[],inFlight=null,paused=false,collected=0;
-  var totals={imported:0,updated:0,skipped:0};
+  var totals={imported:0,updated:0,skipped:0,completed:0};
   var relay=null,relayReady=false,note='';
 
   // ── Panel: fixed top-right, above everything on x.com ──
@@ -115,7 +115,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     dot.style.background=paused?'#a1a1aa':connected?'#22c55e':connecting?'#f59e0b':'#ef4444';
     title.textContent='Siftly '+(paused?'已暂停':connected?'已连接':connecting?'连接中…':'已断开');
     pauseBtn.textContent=paused?'▶':'⏸';pauseBtn.title=paused?'继续收集':'暂停收集';
-    line1.textContent='已收集 '+collected+' · 新增 '+totals.imported+' · 刷新 '+totals.updated;
+    line1.textContent='已收集 '+collected+' · 新增 '+totals.imported+' · 刷新 '+totals.updated+(totals.completed?' · 补全文章 '+totals.completed:'');
     line2.textContent='已存在 '+totals.skipped+' · 待发送 '+(queue.length+(inFlight?inFlight.items.length:0));
     var hint=note||(pageSource()?'':'当前页面不收集（仅点赞页、书签页）');
     line3.textContent=hint;line3.style.display=hint?'block':'none';
@@ -140,6 +140,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     if(e.data.type==='siftly:result'&&inFlight&&e.data.batchId===inFlight.id){
       clearTimeout(inFlight.timer);
       if(e.data.error){queue=inFlight.items.concat(queue);note='入库失败：'+e.data.error;}
+      else if(inFlight.source==='complete'){totals.completed+=e.data.updated||0;note='';}
       else{totals.imported+=e.data.imported||0;totals.updated+=e.data.updated||0;totals.skipped+=e.data.skipped||0;note='';}
       inFlight=null;render();flush();
     }
@@ -153,7 +154,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     for(var i=0;i<queue.length;i++){if(items.length<BATCH&&queue[i].source===source)items.push(queue[i]);else rest.push(queue[i]);}
     queue=rest;
     var id=Date.now()+Math.random();
-    inFlight={id:id,items:items,timer:setTimeout(function(){
+    inFlight={id:id,source:source,items:items,timer:setTimeout(function(){
       if(inFlight&&inFlight.id===id){queue=inFlight.items.concat(queue);inFlight=null;note='发送超时，稍后重试';render();}
     },60000)};
     relay.postMessage({type:'siftly:import',batchId:id,source:source,tweets:items.map(function(x){return x.tweet;})},SIFTLY);
@@ -167,9 +168,17 @@ const BOOKMARKLET_SCRIPT = `(function(){
   // ── Capture: read X's own timeline responses as they load ──
   // Keep the raw GraphQL tweet: only it carries the full text of long posts
   // (note_tweet), X Articles and quoted tweets. Siftly parses it server-side.
+  // X Articles: timelines carry only a preview; opening the article (any page)
+  // loads its full body (content_state), which completes the saved preview row.
+  var seenArticles=new Set();
+  function hasArticleBody(t){
+    var a=t.article&&t.article.article_results&&t.article.article_results.result;
+    return !!(a&&a.content_state&&a.content_state.blocks&&a.content_state.blocks.length);
+  }
   function addTweet(t){
-    if(paused||!t||!t.rest_id||seen.has(t.rest_id))return;
-    var source=pageSource();if(!source)return;
+    if(paused||!t||!t.rest_id)return;
+    if(hasArticleBody(t)&&!seenArticles.has(t.rest_id)){seenArticles.add(t.rest_id);queue.push({source:'complete',tweet:t});}
+    var source=pageSource();if(!source||seen.has(t.rest_id))return;
     seen.add(t.rest_id);queue.push({source:source,tweet:t});collected++;render();
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}

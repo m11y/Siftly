@@ -184,6 +184,11 @@ async function acquireSlot(urgent: boolean): Promise<void> {
   await new Promise<void>((resolve) => (urgent ? waiting.unshift(resolve) : waiting.push(resolve)))
 }
 
+/** Downloads waiting for a slot (lets tests observe the queue instead of guessing timings). */
+export function queuedDownloads(): number {
+  return waiting.length
+}
+
 /** Hand the slot straight to the next waiter so the limit is never exceeded. */
 function releaseSlot(): void {
   const next = waiting.shift()

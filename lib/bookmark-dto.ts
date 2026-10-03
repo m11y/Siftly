@@ -24,7 +24,7 @@ export interface BookmarkRow {
  * quoted tweet) reaches all of them at once instead of only the ones remembered.
  */
 export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): BookmarkWithMedia {
-  const { links, quoted: snapshot } = displayEntities(b.entities)
+  const { links, quoted: snapshot, articlePreview } = displayEntities(b.entities)
   return {
     id: b.id,
     tweetId: b.tweetId,
@@ -35,6 +35,7 @@ export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): Book
     tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
     importedAt: b.importedAt.toISOString(),
     links,
+    articlePreview,
     quotedTweetId: b.quotedTweetId ?? null,
     quoted: quotedRow ? quotedView(quotedRow) : snapshot,
     mediaItems: b.mediaItems.map((m) => ({

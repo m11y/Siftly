@@ -108,6 +108,24 @@ export function ProfileLink({ handle, className, children }: { handle: string; c
   )
 }
 
+// ── X Article preview ─────────────────────────────────────────────────────────
+
+/** X sends only an article's preview in timelines; opening it on X with the Siftly panel on saves the rest. */
+export function ArticlePreviewNote({ tweetUrl }: { tweetUrl: string }) {
+  return (
+    <a
+      href={tweetUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="mt-1.5 inline-block text-xs text-indigo-400 hover:text-indigo-300 hover:underline"
+      title="Siftly has only the preview. Open it on X with the Siftly panel running to save the full article."
+    >
+      X 文章预览 · 在 X 上阅读全文 ↗
+    </a>
+  )
+}
+
 // ── Quoted tweet ───────────────────────────────────────────────────────────────
 // Kept visually below the main tweet: cards show one small thumbnail, the
 // reader a compact grid. `full` (the reader) also shows every line of text.

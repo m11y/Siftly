@@ -137,3 +137,50 @@ describe('refreshing rows saved by the old flattened file export', () => {
     ])
   })
 })
+
+describe('X Article full body', () => {
+  const articleTweet = (withBody: boolean) => ({
+    __typename: 'Tweet', rest_id: '500', ...user('cui'),
+    legacy: { full_text: 'https://t.co/a' },
+    article: { article_results: { result: {
+      title: 'Title', preview_text: 'Preview…',
+      cover_media: { media_info: { original_img_url: 'https://pbs.twimg.com/media/Cover.jpg' } },
+      ...(withBody ? {
+        media_entities: [{ media_info: { original_img_url: 'https://pbs.twimg.com/media/Inline.png' } }],
+        content_state: {
+          blocks: [
+            { type: 'unstyled', text: 'First paragraph see docs', entityRanges: [{ key: 1, offset: 20, length: 4 }] },
+            { type: 'atomic', text: ' ', entityRanges: [{ key: 0, offset: 0, length: 1 }] },
+            { type: 'header-two', text: 'Heading', entityRanges: [] },
+            { type: 'unstyled', text: ' ', entityRanges: [] },
+          ],
+          entityMap: [
+            { key: '0', value: { type: 'MEDIA', data: { caption: 'Image caption' } } },
+            { key: '1', value: { type: 'LINK', data: { url: 'https://example.com/docs' } } },
+          ],
+        },
+      } : {}),
+    } } },
+  })
+
+  it('turns the Draft.js body into paragraphs, with captions, links and inline images', () => {
+    const b = m.parser.parseGraphqlTweet(articleTweet(true))!
+    expect(b.text).toBe('Title\n\nFirst paragraph see docs (https://example.com/docs)\n\nImage caption\n\nHeading')
+    expect(b.media.map((x) => x.url)).toEqual(['https://pbs.twimg.com/media/Cover.jpg', 'https://pbs.twimg.com/media/Inline.png'])
+  })
+
+  it('completes a saved preview once, resets its AI results, never creates rows', async () => {
+    expect(await m.store.completeArticle(m.parser.parseGraphqlTweet(articleTweet(true))!)).toBe('skipped') // not saved yet
+    await m.store.saveBookmark(m.parser.parseGraphqlTweet(articleTweet(false))!, 'like')
+    await m.prisma.bookmark.update({ where: { tweetId: '500' }, data: { semanticTags: '["old"]', enrichedAt: new Date() } })
+    expect(await m.store.completeArticle(m.parser.parseGraphqlTweet(articleTweet(false))!)).toBe('skipped') // preview again
+    expect(await m.store.completeArticle(m.parser.parseGraphqlTweet(articleTweet(true))!)).toBe('updated')
+    expect(await m.store.completeArticle(m.parser.parseGraphqlTweet(articleTweet(true))!)).toBe('skipped') // already full
+    const row = await m.prisma.bookmark.findUnique({ where: { tweetId: '500' }, include: { mediaItems: true } })
+    expect(row).toMatchObject({ source: 'like', semanticTags: null, enrichedAt: null, entities: null })
+    expect(row!.text).toContain('First paragraph')
+    expect(row!.mediaItems).toHaveLength(2)
+    // a later timeline capture (preview only) must not downgrade it
+    expect(await m.store.saveBookmark(m.parser.parseGraphqlTweet(articleTweet(false))!, 'like')).toBe('skipped')
+  })
+})
