@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { displayEntities } from '@/lib/rawjson-extractor'
+import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
 
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 24
@@ -97,30 +97,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prisma.bookmark.count({ where }),
     ])
 
-    const formatted = bookmarks.map((bookmark) => ({
-      id: bookmark.id,
-      tweetId: bookmark.tweetId,
-      text: bookmark.text,
-      authorHandle: bookmark.authorHandle,
-      authorName: bookmark.authorName,
-      source: bookmark.source,
-      tweetCreatedAt: bookmark.tweetCreatedAt?.toISOString() ?? null,
-      importedAt: bookmark.importedAt.toISOString(),
-      ...displayEntities(bookmark.entities),
-      mediaItems: bookmark.mediaItems.map((m) => ({
-        id: m.id,
-        type: m.type,
-        url: m.url,
-        thumbnailUrl: m.thumbnailUrl,
-      })),
-      categories: bookmark.categories.map((bc) => ({
-        id: bc.category.id,
-        name: bc.category.name,
-        slug: bc.category.slug,
-        color: bc.category.color,
-        confidence: bc.confidence,
-      })),
-    }))
+    const formatted = bookmarks.map(toBookmarkWithMedia)
 
     return NextResponse.json({
       bookmarks: formatted,

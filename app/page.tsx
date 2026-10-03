@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { BookmarkIcon, Tag, Image, Layers, Upload, Sparkles, Search, ArrowRight, TrendingUp, Bookmark } from 'lucide-react'
 import prisma from '@/lib/db'
+import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
 import BookmarkCard from '@/components/bookmark-card'
 import type { BookmarkWithMedia } from '@/lib/types'
 
@@ -43,23 +44,7 @@ type QueryResult = Awaited<ReturnType<typeof queryDashboard>>
 function buildDashboardData(result: QueryResult) {
   const [totalBookmarks, totalCategories, totalMedia, uncategorizedCount, recentRaw, catsRaw, bookmarkSourceCount, likeSourceCount] = result
 
-  const recentBookmarks: BookmarkWithMedia[] = recentRaw.map((b) => ({
-    id: b.id,
-    tweetId: b.tweetId,
-    text: b.text,
-    authorHandle: b.authorHandle,
-    authorName: b.authorName,
-    tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
-    importedAt: b.importedAt.toISOString(),
-    mediaItems: b.mediaItems,
-    categories: b.categories.map((bc) => ({
-      id: bc.category.id,
-      name: bc.category.name,
-      slug: bc.category.slug,
-      color: bc.category.color,
-      confidence: null,
-    })),
-  }))
+  const recentBookmarks: BookmarkWithMedia[] = recentRaw.map(toBookmarkWithMedia)
 
   return {
     totalBookmarks,
