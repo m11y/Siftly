@@ -39,6 +39,9 @@ const OPENAI_MODELS = [
   { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', description: 'Fastest' },
   { value: 'o4-mini', label: 'o4-mini', description: 'Reasoning (mini)' },
   { value: 'o3', label: 'o3', description: 'Reasoning' },
+  // DeepSeek via OPENAI_BASE_URL=https://api.deepseek.com (Responses API)
+  { value: 'deepseek-flash', label: 'DeepSeek Flash', description: 'DeepSeek, vision' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek, no vision' },
 ]
 
 const MINIMAX_MODELS = [

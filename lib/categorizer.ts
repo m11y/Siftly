@@ -3,7 +3,7 @@ import { buildImageContext } from '@/lib/image-context'
 import { getCliAvailability, claudePrompt, modelNameToCliAlias } from '@/lib/claude-cli-auth'
 import { getCodexCliAvailability, codexPrompt } from '@/lib/codex-cli'
 import { getActiveModel, getProvider } from '@/lib/settings'
-import { AIClient, resolveAIClient } from '@/lib/ai-client'
+import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 
 const BATCH_SIZE = 20
 
@@ -281,7 +281,7 @@ export async function categorizeBatch(
   const model = await getActiveModel()
   const response = await client.createMessage({
     model,
-    max_tokens: 2048,
+    max_tokens: MAX_OUTPUT_TOKENS,
     messages: [{ role: 'user', content: prompt }],
   })
 

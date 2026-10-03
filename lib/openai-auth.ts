@@ -125,7 +125,8 @@ export function resolveOpenAIClient(options: {
     return new OpenAI({ apiKey: options.dbKey.trim(), ...(baseURL ? { baseURL } : {}) })
   }
 
-  const cliClient = createCodexOpenAIClient(baseURL)
+  // Codex's stored OpenAI credentials must never be sent to a custom base URL.
+  const cliClient = baseURL ? null : createCodexOpenAIClient(baseURL)
   if (cliClient) return cliClient
 
   const envKey = process.env.OPENAI_API_KEY?.trim()

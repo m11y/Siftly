@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { ftsSearch } from '@/lib/fts'
-import { AIClient, resolveAIClient } from '@/lib/ai-client'
+import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 import { getActiveModel, getProvider } from '@/lib/settings'
 import { extractKeywords } from '@/lib/search-utils'
 import { getCliAvailability, claudePrompt, modelNameToCliAlias } from '@/lib/claude-cli-auth'
@@ -378,7 +378,7 @@ Constraints:
     try {
       const response = await client.createMessage({
         model,
-        max_tokens: 1500,
+        max_tokens: MAX_OUTPUT_TOKENS,
         messages: [{ role: 'user', content: prompt }],
       })
       const rawText = response.text ?? '{}'

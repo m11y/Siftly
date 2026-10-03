@@ -5,6 +5,23 @@ import { resolveOpenAIClient } from './openai-auth'
 import { resolveMiniMaxClient } from './minimax-auth'
 import { getProvider } from './settings'
 
+/**
+ * Output cap for every pipeline/search call. Reasoning models (e.g. DeepSeek,
+ * thinking on by default) spend output tokens on thinking first, so the old
+ * 700–4096 caps truncated the JSON answers. The Anthropic SDK rejects
+ * non-streaming requests above ~21,333 tokens, so stay well under that.
+ */
+export const MAX_OUTPUT_TOKENS = 16384
+
+/**
+ * REASONING_EFFORT (e.g. low / high / max) is passed through as each protocol's
+ * effort field; unset sends nothing and keeps the provider default. Values are
+ * provider-defined (DeepSeek maps medium → high), so they are not validated here.
+ */
+function reasoningEffort(): string | undefined {
+  return process.env.REASONING_EFFORT?.trim() || undefined
+}
+
 export interface AIContentBlock {
   type: 'text' | 'image'
   text?: string
@@ -55,10 +72,12 @@ export class AnthropicAIClient implements AIClient {
       return { role: m.role as 'user' | 'assistant', content: blocks }
     })
 
+    const effort = reasoningEffort()
     const msg = await this.sdk.messages.create({
       model: params.model,
       max_tokens: params.max_tokens,
       messages,
+      ...(effort ? { output_config: { effort: effort as 'low' | 'medium' | 'high' | 'max' } } : {}),
     })
 
     const textBlock = msg.content.find(b => b.type === 'text')
@@ -66,37 +85,36 @@ export class AnthropicAIClient implements AIClient {
   }
 }
 
-// Wrap OpenAI SDK
+// Wrap OpenAI SDK — Responses API, which both OpenAI and OpenAI-compatible
+// endpoints such as DeepSeek (OPENAI_BASE_URL) implement.
 export class OpenAIAIClient implements AIClient {
   provider = 'openai' as const
   constructor(private sdk: OpenAI) {}
 
   async createMessage(params: { model: string; max_tokens: number; messages: AIMessage[] }): Promise<AIResponse> {
-    const messages: OpenAI.ChatCompletionMessageParam[] = params.messages.map((m): OpenAI.ChatCompletionMessageParam => {
-      if (typeof m.content === 'string') {
-        if (m.role === 'assistant') return { role: 'assistant' as const, content: m.content }
-        return { role: 'user' as const, content: m.content }
-      }
-      const parts: OpenAI.ChatCompletionContentPart[] = m.content.map(b => {
+    const input: OpenAI.Responses.ResponseInputItem[] = params.messages.map((m): OpenAI.Responses.ResponseInputItem => {
+      if (typeof m.content === 'string') return { role: m.role, content: m.content }
+      const parts: OpenAI.Responses.ResponseInputContent[] = m.content.map((b): OpenAI.Responses.ResponseInputContent => {
         if (b.type === 'image' && b.source) {
-          return {
-            type: 'image_url' as const,
-            image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` },
-          }
+          return { type: 'input_image', detail: 'auto', image_url: `data:${b.source.media_type};base64,${b.source.data}` }
         }
-        return { type: 'text' as const, text: b.text ?? '' }
+        return { type: 'input_text', text: b.text ?? '' }
       })
-      if (m.role === 'assistant') return { role: 'assistant' as const, content: parts.map(p => p.type === 'text' ? p : p).filter((p): p is OpenAI.ChatCompletionContentPartText => p.type === 'text') }
-      return { role: 'user' as const, content: parts }
+      return { role: m.role === 'assistant' ? 'assistant' : 'user', content: parts } as OpenAI.Responses.ResponseInputItem
     })
 
-    const completion = await this.sdk.chat.completions.create({
+    const effort = reasoningEffort()
+    const response = await this.sdk.responses.create({
       model: params.model,
-      max_tokens: params.max_tokens,
-      messages,
+      max_output_tokens: params.max_tokens,
+      input,
+      ...(effort ? { reasoning: { effort: effort as OpenAI.ReasoningEffort } } : {}),
     })
 
-    return { text: completion.choices[0]?.message?.content ?? '' }
+    if (response.status === 'incomplete') {
+      console.warn(`[ai] response incomplete: ${response.incomplete_details?.reason ?? 'unknown'} (model=${params.model})`)
+    }
+    return { text: response.output_text ?? '' }
   }
 }
 
