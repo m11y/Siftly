@@ -1,9 +1,11 @@
 'use client'
 
 import React, { useRef, useEffect, useState } from 'react'
-import { ExternalLink, Download, FileText, Play, Pencil, X, Check, ImageOff, Bookmark, Globe } from 'lucide-react'
-import type { BookmarkWithMedia, Category, QuotedTweet } from '@/lib/types'
+import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, ImageOff, Bookmark, Globe } from 'lucide-react'
+import type { BookmarkWithMedia, Category } from '@/lib/types'
 import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
+import TweetReader from '@/components/tweet-reader'
+import { AuthorAvatar, QuotedTweetBlock, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
@@ -211,90 +213,7 @@ async function fetchAllCategories(): Promise<Category[]> {
   return cacheFetchPromise
 }
 
-const COLOR_PALETTE = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b',
-  '#10b981', '#3b82f6', '#ef4444', '#14b8a6',
-]
-
-function stringToColor(str: string): string {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return COLOR_PALETTE[Math.abs(hash) % COLOR_PALETTE.length]
-}
-
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/)
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-}
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
-// ── Author Avatar ──────────────────────────────────────────────────────────────
-
-function AuthorAvatar({ name, handle, tweetId }: { name: string; handle: string; tweetId: string }) {
-  const [failures, setFailures] = useState(0)
-  const bg = stringToColor(handle)
-  const initials = getInitials(name)
-
-  // The avatar from the tweet JSON (local copy when saved), then unavatar.io for
-  // older imports that lack it, then initials.
-  const cleanHandle = handle.replace(/^@/, '')
-  const sources = [
-    `/api/media?tweetId=${tweetId}&kind=avatar`,
-    ...(cleanHandle && cleanHandle !== 'unknown' ? [`https://unavatar.io/twitter/${cleanHandle}`] : []),
-  ]
-  const src = sources[failures]
-
-  if (src) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt={name}
-        className="flex-shrink-0 w-8 h-8 rounded-full object-cover select-none"
-        loading="lazy"
-        onError={() => setFailures((n) => n + 1)}
-      />
-    )
-  }
-
-  return (
-    <div
-      className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold select-none"
-      style={{ backgroundColor: bg }}
-      aria-hidden="true"
-    >
-      {initials}
-    </div>
-  )
-}
-
 // ── Top media slot (no margins — rendered full-bleed at top of card) ────────
-
-/** With tweetId, /api/media serves the pipeline's local copy when it exists. */
-function proxyUrl(url: string, tweetId?: string): string {
-  return `/api/media?url=${encodeURIComponent(url)}${tweetId ? `&tweetId=${tweetId}` : ''}`
-}
-
-/** X card images may have a local copy; other sites' og:image load as before. */
-function previewImageSrc(image: string, tweetId?: string): string {
-  return tweetId && image.startsWith('https://pbs.twimg.com/') ? proxyUrl(image, tweetId) : image
-}
-
-/** Returns true if the URL points to an actual video file (not a thumbnail JPEG) */
-function isVideoUrl(url: string): boolean {
-  return url.includes('video.twimg.com') || url.includes('.mp4')
-}
 
 interface TopMediaSlotProps {
   item: BookmarkWithMedia['mediaItems'][number]
@@ -386,35 +305,6 @@ function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
       onClick={(e) => e.stopPropagation()}
       onError={() => setVideoError(true)}
     />
-  )
-}
-
-// ── Quoted tweet ───────────────────────────────────────────────────────────────
-// Text only for now: the quoted tweet's media is not downloaded or shown.
-
-function QuotedTweetBlock({ quoted }: { quoted: QuotedTweet }) {
-  const url = quoted.authorHandle !== 'unknown'
-    ? `https://x.com/${quoted.authorHandle}/status/${quoted.tweetId}`
-    : `https://x.com/i/web/status/${quoted.tweetId}`
-  const segments = tweetSegments(quoted.text, quoted.links)
-  return (
-    <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-800/30 px-3 py-2">
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="flex items-baseline gap-1.5 text-xs hover:underline"
-      >
-        <span className="font-semibold text-zinc-300 truncate">{quoted.authorName}</span>
-        <span className="text-zinc-500 truncate">@{quoted.authorHandle}</span>
-      </a>
-      {segments.length > 0 && (
-        <p className="mt-1 text-xs text-zinc-400 leading-relaxed line-clamp-4">
-          <TweetText segments={segments} />
-        </p>
-      )}
-    </div>
   )
 }
 
@@ -599,6 +489,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const [categories, setCategories] = useState(bookmark.categories)
   const [expanded, setExpanded] = useState(false)
   const [editingCategories, setEditingCategories] = useState(false)
+  const [readerOpen, setReaderOpen] = useState(false)
 
   const tweetUrl = (bookmark.authorHandle && bookmark.authorHandle !== 'unknown')
     ? `https://twitter.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
@@ -743,8 +634,9 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             </div>
           </div>
 
+          <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
           {/* Actions — visible on hover */}
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5">
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={handleDownloadMarkdown}
               className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
@@ -770,6 +662,15 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             >
               <ExternalLink size={13} />
             </a>
+          </div>
+          {/* Full tweet — always visible and colored, unlike the hover actions */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setReaderOpen(true) }}
+            className="p-1.5 rounded-lg text-indigo-400 bg-indigo-500/10 hover:text-indigo-300 hover:bg-indigo-500/20 transition-colors"
+            title="Read full tweet"
+          >
+            <BookOpen size={13} />
+          </button>
           </div>
         </div>
 
@@ -851,6 +752,9 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
         </div>
 
       </div>
+      {readerOpen && (
+        <TweetReader bookmark={bookmark} categories={categories} onClose={() => setReaderOpen(false)} />
+      )}
     </div>
   )
 }
