@@ -18,8 +18,11 @@ export default function CommandPalette() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(0)
-  // Result opened in Siftly's full-tweet dialog (outlives the palette)
+  // Result previewed in Siftly's full-tweet dialog, on top of the palette.
+  // Closing it returns to the same query, results and selection.
   const [readerBookmark, setReaderBookmark] = useState<BookmarkWithMedia | null>(null)
+  const readerOpen = useRef(false)
+  useEffect(() => { readerOpen.current = readerBookmark !== null }, [readerBookmark])
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const router = useRouter()
@@ -31,7 +34,8 @@ export default function CommandPalette() {
         e.preventDefault()
         setOpen((v) => !v)
       }
-      if (e.key === 'Escape') setOpen(false)
+      // Esc while previewing closes only the preview (TweetReader handles it)
+      if (e.key === 'Escape' && !readerOpen.current) setOpen(false)
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
@@ -95,13 +99,16 @@ export default function CommandPalette() {
   }
 
   function openBookmark(b: BookmarkWithMedia) {
-    setOpen(false)
+    inputRef.current?.blur() // keys go to the preview, not the result list
     setReaderBookmark(b)
   }
 
-  const reader = readerBookmark && (
-    <TweetReader bookmark={readerBookmark} onClose={() => setReaderBookmark(null)} />
-  )
+  function closePreview() {
+    setReaderBookmark(null)
+    inputRef.current?.focus()
+  }
+
+  const reader = readerBookmark && <TweetReader bookmark={readerBookmark} onClose={closePreview} />
 
   if (!open) return reader
 
