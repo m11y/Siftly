@@ -300,37 +300,10 @@ function isVideoUrl(url: string): boolean {
   return url.includes('video.twimg.com') || url.includes('.mp4')
 }
 
-/** Derive a thumbnail URL from a Twitter video URL */
-function deriveVideoThumb(url: string): string | null {
-  // amplify_video/{id}/vid/... → pbs.twimg.com/amplify_video_thumb/{id}/img/default.jpg
-  const amplify = url.match(/video\.twimg\.com\/amplify_video\/(\d+)/)
-  if (amplify) return `https://pbs.twimg.com/amplify_video_thumb/${amplify[1]}/img/default.jpg`
-  // ext_tw_video/{id}/pu/vid/... → pbs.twimg.com/ext_tw_video_thumb/{id}/pu/img/default.jpg
-  const ext = url.match(/video\.twimg\.com\/ext_tw_video\/(\d+)/)
-  if (ext) return `https://pbs.twimg.com/ext_tw_video_thumb/${ext[1]}/pu/img/default.jpg`
-  // tweet_video/{id}.mp4 → pbs.twimg.com/tweet_video_thumb/{id}.jpg
-  const tweet = url.match(/video\.twimg\.com\/tweet_video\/([^.]+)\.mp4/)
-  if (tweet) return `https://pbs.twimg.com/tweet_video_thumb/${tweet[1]}.jpg`
-  return null
-}
-
 interface TopMediaSlotProps {
   item: BookmarkWithMedia['mediaItems'][number]
   tweetUrl: string
   tweetId: string
-}
-
-/** Consistent overlay shown on top of a thumbnail — used for both video and X-link cases */
-function MediaOverlay({ label, icon }: { label?: string; icon?: React.ReactNode }) {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/50 transition-colors">
-      {icon ?? (
-        <span className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-semibold backdrop-blur-sm">
-          {label ?? 'Watch on X ↗'}
-        </span>
-      )}
-    </div>
-  )
 }
 
 /** Placeholder shown when no thumbnail is available — styled as a proper video preview */
@@ -362,6 +335,7 @@ function MediaPlaceholder({ onClick, label, isVideo }: { onClick?: (e: React.Mou
 
 function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
   const [imgError, setImgError] = useState(false)
+  const [videoError, setVideoError] = useState(false)
 
   // ── Photo: show inline ─────────────────────────────────────────────────────
   if (item.type === 'photo') {
@@ -389,30 +363,33 @@ function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
     )
   }
 
-  // ── Video/GIF: always redirect to tweet — can't play locally ──────────────
-  // Guard: thumbnailUrl that is itself a video URL is not usable as an <img>
-  const rawThumb = item.thumbnailUrl ?? null
-  const thumb = rawThumb && !isVideoUrl(rawThumb) ? rawThumb
-    : (!isVideoUrl(item.url) ? item.url : deriveVideoThumb(item.url))
+  // ── Video/GIF: play the local copy inline (saved by the pipeline's media stage) ──
+  // Posters exist only for imports that carried one; otherwise `#t=0.1` makes the
+  // browser render an early frame as the preview, with no extra file to keep.
+  const poster = item.thumbnailUrl && !isVideoUrl(item.thumbnailUrl) ? proxyUrl(item.thumbnailUrl, tweetId) : undefined
+  const isGif = item.type === 'gif'
 
+  if (videoError) {
+    return (
+      <a href={tweetUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+        <MediaPlaceholder label="Watch on X ↗" isVideo={!isGif} />
+      </a>
+    )
+  }
   return (
-    <a href={tweetUrl} target="_blank" rel="noopener noreferrer" className="relative block" onClick={(e) => e.stopPropagation()}>
-      {thumb && !imgError ? (
-        <div className="relative">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={proxyUrl(thumb, tweetId)}
-            alt=""
-            className="w-full h-48 object-cover"
-            loading="lazy"
-            onError={() => setImgError(true)}
-          />
-          <MediaOverlay />
-        </div>
-      ) : (
-        <MediaPlaceholder label="Watch on X ↗" isVideo={item.type === 'video'} />
-      )}
-    </a>
+    <video
+      src={`${proxyUrl(item.url, tweetId)}${poster ? '' : '#t=0.1'}`}
+      poster={poster}
+      className="w-full h-48 object-contain bg-black"
+      preload={isGif ? 'auto' : 'metadata'}
+      controls={!isGif}
+      autoPlay={isGif}
+      loop={isGif}
+      muted={isGif}
+      playsInline
+      onClick={(e) => e.stopPropagation()}
+      onError={() => setVideoError(true)}
+    />
   )
 }
 
