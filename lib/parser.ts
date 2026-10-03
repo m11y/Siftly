@@ -14,6 +14,10 @@ export interface ParsedBookmark {
   urls: string[]
   media: ParsedMedia[]
   rawJson: string
+  /** Tweet this one quotes (from X GraphQL data only). */
+  quotedTweetId?: string | null
+  /** The quoted tweet itself, when X sent its content; saved as a "quote" row. */
+  quoted?: ParsedBookmark | null
 }
 
 interface TwitterMediaVariant {
@@ -313,8 +317,10 @@ export interface GraphqlTweet {
     created_at?: string
     entities?: TwitterEntities
     extended_entities?: { media?: TwitterMediaEntity[] }
+    quoted_status_id_str?: string
   }
   core?: { user_results?: { result?: GraphqlUser } }
+  quoted_status_result?: { result?: GraphqlTweet }
   note_tweet?: { note_tweet_results?: { result?: { text?: string } } }
   article?: { article_results?: { result?: GraphqlArticle } }
 }
@@ -354,6 +360,9 @@ export function parseGraphqlTweet(raw: GraphqlTweet): ParsedBookmark | null {
   // X moved name/screen_name from user_results.result.legacy to .core; read both.
   const user = tweet.core?.user_results?.result
   const createdAt = tweet.legacy?.created_at ? new Date(tweet.legacy.created_at) : null
+  // X embeds one level of quoted tweet; its own quote arrives as an id only.
+  const quotedResult = tweet.quoted_status_result?.result
+  const quoted = quotedResult ? parseGraphqlTweet(quotedResult) : null
 
   return {
     tweetId: tweet.rest_id,
@@ -365,6 +374,8 @@ export function parseGraphqlTweet(raw: GraphqlTweet): ParsedBookmark | null {
     urls: extractUrls({ entities: tweet.legacy?.entities }),
     media: graphqlMedia(tweet),
     rawJson: JSON.stringify(tweet),
+    quotedTweetId: tweet.legacy?.quoted_status_id_str ?? quoted?.tweetId ?? null,
+    quoted,
   }
 }
 

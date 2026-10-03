@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { ftsSearch } from '@/lib/fts'
-import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
+import { toBookmarkCards } from '@/lib/bookmark-dto'
 import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 import { getActiveModel, getProvider } from '@/lib/settings'
 import { extractKeywords } from '@/lib/search-utils'
@@ -221,6 +221,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const selectShape = {
     id: true, tweetId: true, text: true, authorHandle: true, authorName: true,
     tweetCreatedAt: true, importedAt: true, semanticTags: true, entities: true,
+    source: true, quotedTweetId: true,
     mediaItems: { select: { id: true, type: true, url: true, thumbnailUrl: true, imageTags: true } },
     categories: {
       include: { category: { select: { id: true, name: true, slug: true, color: true } } },
@@ -395,18 +396,15 @@ Constraints:
   const bookmarkById = new Map(bookmarks.map((b) => [b.id, b]))
   const matchMap = new Map(aiResponse.matches.map((m) => [m.id, m]))
 
-  const results = aiResponse.matches
+  const matched = aiResponse.matches
     .sort((a, b) => b.score - a.score)
-    .map((match) => {
-      const b = bookmarkById.get(match.id)
-      if (!b) return null
-      return {
-        ...toBookmarkWithMedia(b),
-        aiScore: matchMap.get(b.id)?.score ?? 0,
-        aiReason: matchMap.get(b.id)?.reason ?? '',
-      }
-    })
-    .filter(Boolean)
+    .map((match) => bookmarkById.get(match.id))
+    .filter((b): b is NonNullable<typeof b> => !!b)
+  const results = (await toBookmarkCards(matched)).map((card) => ({
+    ...card,
+    aiScore: matchMap.get(card.id)?.score ?? 0,
+    aiReason: matchMap.get(card.id)?.reason ?? '',
+  }))
 
   const response = { bookmarks: results, explanation: aiResponse.explanation }
   setCache(cacheKey, response)

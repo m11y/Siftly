@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
-import { AuthorAvatar, QuotedTweetBlock, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
+import { AuthorAvatar, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
  * Full view of one tweet: complete text with its line breaks, every photo and
@@ -41,8 +41,10 @@ export default function TweetReader({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 cursor-default"
+      // React bubbles portal events to the card, whose click opens this dialog;
+      // stop here so closing via the backdrop doesn't immediately reopen it.
+      onClick={(e) => { e.stopPropagation(); onClose() }}
     >
       <div
         className="relative flex flex-col w-full max-w-2xl max-h-[85vh] rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
@@ -122,6 +124,7 @@ export default function TweetReader({
           )}
 
           {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} full />}
+          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
 
           {categories.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-1">

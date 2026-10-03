@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import prisma from '@/lib/db'
+import { saveBookmark } from '@/lib/bookmark-store'
 import { GraphqlTweet, parseGraphqlTweet } from '@/lib/parser'
 
 const ALLOWED_ORIGINS = new Set(['https://x.com', 'https://twitter.com'])
@@ -43,39 +43,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const bookmark = parseGraphqlTweet(raw)
     if (!bookmark) continue
 
-    const exists = await prisma.bookmark.findUnique({
-      where: { tweetId: bookmark.tweetId },
-      select: { id: true },
-    })
-    if (exists) {
-      skipped++
-      continue
-    }
-
-    const created = await prisma.bookmark.create({
-      data: {
-        tweetId: bookmark.tweetId,
-        text: bookmark.text,
-        authorHandle: bookmark.authorHandle,
-        authorName: bookmark.authorName,
-        tweetCreatedAt: bookmark.tweetCreatedAt,
-        rawJson: bookmark.rawJson,
-        source,
-      },
-    })
-
-    if (bookmark.media.length > 0) {
-      await prisma.mediaItem.createMany({
-        data: bookmark.media.map((m) => ({
-          bookmarkId: created.id,
-          type: m.type,
-          url: m.url,
-          thumbnailUrl: m.thumbnailUrl ?? null,
-        })),
-      })
-    }
-
-    imported++
+    if ((await saveBookmark(bookmark, source)) === 'imported') imported++
+    else skipped++
   }
 
   return NextResponse.json({ imported, skipped }, { headers: cors })

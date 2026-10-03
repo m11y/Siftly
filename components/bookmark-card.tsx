@@ -5,7 +5,7 @@ import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, Ima
 import type { BookmarkWithMedia, Category } from '@/lib/types'
 import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
 import TweetReader from '@/components/tweet-reader'
-import { AuthorAvatar, QuotedTweetBlock, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
+import { AuthorAvatar, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
@@ -491,6 +491,15 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const [editingCategories, setEditingCategories] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
 
+  // Like X: a click anywhere on the card opens the full tweet, except on
+  // controls that do something themselves, or when the user is selecting text.
+  function handleCardClick(e: React.MouseEvent) {
+    const target = e.target as HTMLElement
+    if (target.closest('a, button, video, input, textarea, select, [data-no-reader]')) return
+    if (window.getSelection()?.toString()) return
+    setReaderOpen(true)
+  }
+
   const tweetUrl = (bookmark.authorHandle && bookmark.authorHandle !== 'unknown')
     ? `https://twitter.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
     : `https://twitter.com/i/web/status/${bookmark.tweetId}`
@@ -604,7 +613,10 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
     (firstMedia.type === 'photo' || isVideoUrl(firstMedia.url))
 
   return (
-    <div className="group relative bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-zinc-700 hover:shadow-xl hover:shadow-black/30 transition-all duration-200 flex flex-col flex-1">
+    <div
+      className="group relative bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-zinc-700 hover:shadow-xl hover:shadow-black/30 transition-all duration-200 flex flex-col flex-1 cursor-pointer"
+      onClick={handleCardClick}
+    >
 
       {/* Top media — full bleed, no padding */}
       {firstMedia && (
@@ -630,6 +642,14 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
               )}
               <p className="text-xs text-zinc-500 truncate">
                 {isKnownAuthor ? `@${bookmark.authorHandle}` : dateStr}
+                {bookmark.source === 'quote' && (
+                  <span
+                    className="ml-1.5 px-1.5 py-px rounded bg-zinc-800 text-[10px] text-zinc-400"
+                    title="Saved because a bookmarked tweet quotes it"
+                  >
+                    引用
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -707,6 +727,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             <p className="text-xs text-zinc-700 italic">No text content</p>
           )}
           {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} />}
+          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
           {previewUrl && (
             <LinkPreview url={previewUrl} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} prominent={!hasText} />
           )}
@@ -742,12 +763,14 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
           </div>
 
           {editingCategories && (
+            <div data-no-reader>
             <CategoryEditor
               bookmarkId={bookmark.id}
               currentCategoryIds={currentCategoryIds}
               onSave={handleSaveCategories}
               onClose={() => setEditingCategories(false)}
             />
+            </div>
           )}
         </div>
 

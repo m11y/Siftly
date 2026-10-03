@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { BookmarkIcon, Tag, Image, Layers, Upload, Sparkles, Search, ArrowRight, TrendingUp, Bookmark } from 'lucide-react'
 import prisma from '@/lib/db'
-import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
+import { toBookmarkCards } from '@/lib/bookmark-dto'
 import BookmarkCard from '@/components/bookmark-card'
 import type { BookmarkWithMedia } from '@/lib/types'
 
@@ -41,10 +41,10 @@ async function queryDashboard() {
 
 type QueryResult = Awaited<ReturnType<typeof queryDashboard>>
 
-function buildDashboardData(result: QueryResult) {
+async function buildDashboardData(result: QueryResult) {
   const [totalBookmarks, totalCategories, totalMedia, uncategorizedCount, recentRaw, catsRaw, bookmarkSourceCount, likeSourceCount] = result
 
-  const recentBookmarks: BookmarkWithMedia[] = recentRaw.map(toBookmarkWithMedia)
+  const recentBookmarks: BookmarkWithMedia[] = await toBookmarkCards(recentRaw)
 
   return {
     totalBookmarks,
@@ -77,7 +77,7 @@ const EMPTY_DASHBOARD = {
 async function getDashboardData() {
   try {
     const result = await queryDashboard()
-    return buildDashboardData(result)
+    return await buildDashboardData(result)
   } catch {
     return EMPTY_DASHBOARD
   }

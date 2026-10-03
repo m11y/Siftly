@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
+import { saveBookmark } from '@/lib/bookmark-store'
 import { parseBookmarksJson } from '@/lib/parser'
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -76,40 +77,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   for (const bookmark of parsedBookmarks) {
     try {
-      const existing = await prisma.bookmark.findUnique({
-        where: { tweetId: bookmark.tweetId },
-        select: { id: true },
-      })
-
-      if (existing) {
-        skippedCount++
-        continue
-      }
-
-      const created = await prisma.bookmark.create({
-        data: {
-          tweetId: bookmark.tweetId,
-          text: bookmark.text,
-          authorHandle: bookmark.authorHandle,
-          authorName: bookmark.authorName,
-          tweetCreatedAt: bookmark.tweetCreatedAt,
-          rawJson: bookmark.rawJson,
-          source,
-        },
-      })
-
-      if (bookmark.media.length > 0) {
-        await prisma.mediaItem.createMany({
-          data: bookmark.media.map((m) => ({
-            bookmarkId: created.id,
-            type: m.type,
-            url: m.url,
-            thumbnailUrl: m.thumbnailUrl ?? null,
-          })),
-        })
-      }
-
-      importedCount++
+      if ((await saveBookmark(bookmark, source)) === 'imported') importedCount++
+      else skippedCount++
     } catch (err) {
       console.error(`Failed to import tweet ${bookmark.tweetId}:`, err)
       skippedCount++

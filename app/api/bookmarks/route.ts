@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
+import { toBookmarkCards } from '@/lib/bookmark-dto'
 
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 24
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prisma.bookmark.count({ where }),
     ])
 
-    const formatted = bookmarks.map(toBookmarkWithMedia)
+    const formatted = await toBookmarkCards(bookmarks)
 
     return NextResponse.json({
       bookmarks: formatted,

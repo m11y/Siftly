@@ -18,6 +18,7 @@ import {
 import { backfillEntities } from '@/lib/rawjson-extractor'
 import { rebuildFts } from '@/lib/fts'
 import { downloadMissingMedia } from '@/lib/media-store'
+import { linkQuotedTweets } from '@/lib/bookmark-store'
 
 type Stage = 'vision' | 'entities' | 'media' | 'enrichment' | 'categorize' | 'parallel'
 
@@ -168,6 +169,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (force) {
           await prisma.mediaItem.updateMany({ where: { imageTags: '{}' }, data: { imageTags: null } })
           await prisma.bookmark.updateMany({ where: { semanticTags: '[]' }, data: { semanticTags: null } })
+        }
+
+        // Stage 0: Save quoted tweets of older rows as "quote" rows (no API calls),
+        // first, so they get entities, media and AI processing in this same run.
+        if (!shouldAbort()) {
+          await linkQuotedTweets(shouldAbort).catch((err) => console.error('Quote linking error:', err))
         }
 
         // Stage 1: Entity extraction (free, fast — no API calls)
