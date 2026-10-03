@@ -124,7 +124,7 @@ function LinkPreview({ url, tweetUrl, tweetId, prominent = false }: { url: strin
         {data.image && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={data.image}
+            src={previewImageSrc(data.image, tweetId)}
             alt=""
             className="w-full h-40 object-cover border-b border-zinc-800"
             loading="lazy"
@@ -162,7 +162,7 @@ function LinkPreview({ url, tweetUrl, tweetId, prominent = false }: { url: strin
       {data.image && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={data.image}
+          src={previewImageSrc(data.image, tweetId)}
           alt=""
           className="w-24 h-full object-cover shrink-0 border-r border-zinc-800"
           loading="lazy"
@@ -245,16 +245,21 @@ function formatDate(dateStr: string | null): string {
 
 // ── Author Avatar ──────────────────────────────────────────────────────────────
 
-function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: string; avatarUrl?: string | null }) {
-  const [imgFailed, setImgFailed] = useState(false)
+function AuthorAvatar({ name, handle, tweetId }: { name: string; handle: string; tweetId: string }) {
+  const [failures, setFailures] = useState(0)
   const bg = stringToColor(handle)
   const initials = getInitials(name)
 
-  // Prefer stored avatar URL, fall back to unavatar.io for any Twitter handle
+  // The avatar from the tweet JSON (local copy when saved), then unavatar.io for
+  // older imports that lack it, then initials.
   const cleanHandle = handle.replace(/^@/, '')
-  const src = avatarUrl ?? (cleanHandle && cleanHandle !== 'unknown' ? `https://unavatar.io/twitter/${cleanHandle}` : null)
+  const sources = [
+    `/api/media?tweetId=${tweetId}&kind=avatar`,
+    ...(cleanHandle && cleanHandle !== 'unknown' ? [`https://unavatar.io/twitter/${cleanHandle}`] : []),
+  ]
+  const src = sources[failures]
 
-  if (src && !imgFailed) {
+  if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -262,7 +267,7 @@ function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: strin
         alt={name}
         className="flex-shrink-0 w-8 h-8 rounded-full object-cover select-none"
         loading="lazy"
-        onError={() => setImgFailed(true)}
+        onError={() => setFailures((n) => n + 1)}
       />
     )
   }
@@ -280,8 +285,14 @@ function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: strin
 
 // ── Top media slot (no margins — rendered full-bleed at top of card) ────────
 
-function proxyUrl(url: string): string {
-  return `/api/media?url=${encodeURIComponent(url)}`
+/** With tweetId, /api/media serves the pipeline's local copy when it exists. */
+function proxyUrl(url: string, tweetId?: string): string {
+  return `/api/media?url=${encodeURIComponent(url)}${tweetId ? `&tweetId=${tweetId}` : ''}`
+}
+
+/** X card images may have a local copy; other sites' og:image load as before. */
+function previewImageSrc(image: string, tweetId?: string): string {
+  return tweetId && image.startsWith('https://pbs.twimg.com/') ? proxyUrl(image, tweetId) : image
 }
 
 /** Returns true if the URL points to an actual video file (not a thumbnail JPEG) */
@@ -306,6 +317,7 @@ function deriveVideoThumb(url: string): string | null {
 interface TopMediaSlotProps {
   item: BookmarkWithMedia['mediaItems'][number]
   tweetUrl: string
+  tweetId: string
 }
 
 /** Consistent overlay shown on top of a thumbnail — used for both video and X-link cases */
@@ -348,7 +360,7 @@ function MediaPlaceholder({ onClick, label, isVideo }: { onClick?: (e: React.Mou
   )
 }
 
-function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
+function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
   const [imgError, setImgError] = useState(false)
 
   // ── Photo: show inline ─────────────────────────────────────────────────────
@@ -368,7 +380,7 @@ function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={proxyUrl(item.url)}
+        src={proxyUrl(item.url, tweetId)}
         alt="Bookmark media"
         className="w-full h-48 object-cover"
         loading="lazy"
@@ -389,7 +401,7 @@ function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
         <div className="relative">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={proxyUrl(thumb)}
+            src={proxyUrl(thumb, tweetId)}
             alt=""
             className="w-full h-48 object-cover"
             loading="lazy"
@@ -632,7 +644,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   function handleDownload() {
     if (!firstMedia) return
     const a = document.createElement('a')
-    a.href = `/api/media?url=${encodeURIComponent(firstMedia.url)}&download=1`
+    a.href = `${proxyUrl(firstMedia.url, bookmark.tweetId)}&download=1`
     a.download = ''
     document.body.appendChild(a)
     a.click()
@@ -703,7 +715,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
       {/* Top media — full bleed, no padding */}
       {firstMedia && (
         <div className="border-b border-zinc-800/60 rounded-t-2xl overflow-hidden shrink-0">
-          <TopMediaSlot item={firstMedia} tweetUrl={tweetUrl} />
+          <TopMediaSlot item={firstMedia} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} />
         </div>
       )}
 
@@ -714,7 +726,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="flex items-center gap-2.5 min-w-0">
             {isKnownAuthor && (
-              <AuthorAvatar name={bookmark.authorName} handle={bookmark.authorHandle} />
+              <AuthorAvatar name={bookmark.authorName} handle={bookmark.authorHandle} tweetId={bookmark.tweetId} />
             )}
             <div className="min-w-0">
               {isKnownAuthor && (

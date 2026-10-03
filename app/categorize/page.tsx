@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Sparkles, Loader2, CheckCircle, ChevronRight, Eye, Tag, Brain, Layers, StopCircle } from 'lucide-react'
+import { Sparkles, Loader2, CheckCircle, ChevronRight, Eye, Tag, Brain, Layers, StopCircle, Download } from 'lucide-react'
 import * as Progress from '@radix-ui/react-progress'
 
-type Stage = 'vision' | 'entities' | 'enrichment' | 'categorize' | 'parallel' | null
+type Stage = 'vision' | 'entities' | 'media' | 'enrichment' | 'categorize' | 'parallel' | null
 
 interface StageCounts {
   visionTagged: number
   entitiesExtracted: number
+  mediaDownloaded: number
   enriched: number
   categorized: number
 }
@@ -28,12 +29,17 @@ const STAGE_INFO: Record<NonNullable<Stage>, { label: string; icon: React.ReactN
   vision: {
     label: 'Analyzing images',
     icon: <Eye size={14} />,
-    desc: 'Extracting text, objects, and context from photos, GIFs, and videos',
+    desc: 'Extracting text, objects, and context from photos',
   },
   entities: {
     label: 'Extracting entities',
     icon: <Tag size={14} />,
     desc: 'Mining hashtags, URLs, and tool mentions from tweet data',
+  },
+  media: {
+    label: 'Saving media locally',
+    icon: <Download size={14} />,
+    desc: 'Downloading photos, videos, avatars, and card images that are not on disk yet',
   },
   enrichment: {
     label: 'Generating semantic tags',
@@ -195,6 +201,7 @@ export default function CategorizePage() {
                 {[
                   { key: 'visionTagged', label: 'images analyzed', icon: <Eye size={13} />, active: status.stage === 'vision' || status.stage === 'parallel' },
                   { key: 'entitiesExtracted', label: 'entities extracted', icon: <Tag size={13} />, active: status.stage === 'entities' },
+                  { key: 'mediaDownloaded', label: 'media files saved', icon: <Download size={13} />, active: status.stage === 'media' },
                   { key: 'enriched', label: 'bookmarks enriched', icon: <Brain size={13} />, active: status.stage === 'enrichment' || status.stage === 'parallel' },
                   { key: 'categorized', label: 'categorized', icon: <Layers size={13} />, active: status.stage === 'categorize' || status.stage === 'parallel' },
                 ].map(({ key, label, icon, active }) => {

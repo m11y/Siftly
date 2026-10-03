@@ -20,14 +20,16 @@ interface TweetNodeData {
   [key: string]: unknown
 }
 
-function proxyUrl(url: string): string {
-  return `/api/media?url=${encodeURIComponent(url)}`
+/** With tweetId, /api/media serves the pipeline's local copy when it exists. */
+function proxyUrl(url: string, tweetId: string): string {
+  return `/api/media?url=${encodeURIComponent(url)}&tweetId=${tweetId}`
 }
 
 const HANDLE_STYLE = { opacity: 0, width: 1, height: 1, minWidth: 1, minHeight: 1 }
 
 export default function TweetNode({ data }: NodeProps) {
   const {
+    tweetId,
     text,
     authorHandle,
     tweetUrl,
@@ -43,7 +45,7 @@ export default function TweetNode({ data }: NodeProps) {
   const color = categoryColor
 
   // Proxy through our media API to avoid CORS issues with Twitter CDN
-  const proxied = thumbnailUrl ? proxyUrl(thumbnailUrl) : null
+  const proxied = thumbnailUrl ? proxyUrl(thumbnailUrl, tweetId) : null
   const showImage = proxied !== null && !imgFailed
 
   return (
