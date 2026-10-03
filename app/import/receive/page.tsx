@@ -58,8 +58,24 @@ export default function ReceivePage() {
 
     async function onMessage(e: MessageEvent) {
       if (!X_ORIGINS.has(e.origin) || e.source !== opener) return
-      const data = e.data as { type?: string; batchId?: number; source?: string; tweets?: unknown[] } | null
+      const data = e.data as { type?: string; batchId?: number; lookupId?: number; source?: string; tweets?: unknown[]; tweetIds?: unknown[] } | null
       if (data?.type === 'siftly:bye') { window.close(); return }
+      if (data?.type === 'siftly:lookup' && Array.isArray(data.tweetIds)) {
+        // Which tweets visible on X are saved (for the ✓ marks). A failed lookup
+        // is simply retried by the bookmarklet later.
+        try {
+          const res = await fetch('/api/bookmarks/exists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tweetIds: data.tweetIds }),
+          })
+          const { existing } = (await res.json()) as { existing?: string[] }
+          opener?.postMessage({ type: 'siftly:lookupResult', lookupId: data.lookupId, existing: existing ?? [] }, e.origin)
+        } catch {
+          opener?.postMessage({ type: 'siftly:lookupResult', lookupId: data.lookupId, error: true }, e.origin)
+        }
+        return
+      }
       if (data?.type !== 'siftly:import' || !Array.isArray(data.tweets)) return
 
       setBusy(true)
