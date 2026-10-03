@@ -18,6 +18,8 @@ import CategoryNode from './category-node'
 import TweetNode from './tweet-node'
 import ChainEdge from './chain-edge'
 import { MindmapContext } from './mindmap-context'
+import TweetReader from '@/components/tweet-reader'
+import type { BookmarkWithMedia } from '@/lib/types'
 
 const nodeTypes = { root: RootNode, category: CategoryNode, tweet: TweetNode }
 const edgeTypes = { chain: ChainEdge }
@@ -59,6 +61,7 @@ export default function MindmapCanvas({ initialNodes, initialEdges }: MindmapCan
   const [focusedSlug, setFocusedSlug] = useState<string | null>(null)
   const [tweetCache, setTweetCache] = useState<Record<string, { nodes: Node[]; edges: Edge[] }>>({})
   const [bgColor, setBgColor] = useState('#111113')
+  const [readerBookmark, setReaderBookmark] = useState<BookmarkWithMedia | null>(null)
   const [showLabels, setShowLabels] = useState(false)
 
   useEffect(() => {
@@ -85,6 +88,18 @@ export default function MindmapCanvas({ initialNodes, initialEdges }: MindmapCan
 
   const handleNodeClick: NodeMouseHandler = useCallback(async (_, node) => {
     if (node.type === 'root') { resetToCategories(); return }
+    if (node.type === 'tweet') {
+      // Same full-tweet dialog as the cards; load the card data on demand.
+      const { tweetId } = node.data as { tweetId: string }
+      try {
+        const res = await fetch(`/api/bookmarks?tweetId=${encodeURIComponent(tweetId)}&limit=1`)
+        const { bookmarks } = (await res.json()) as { bookmarks: BookmarkWithMedia[] }
+        if (bookmarks[0]) setReaderBookmark(bookmarks[0])
+      } catch (err) {
+        console.error('Failed to load bookmark:', err)
+      }
+      return
+    }
     if (node.type !== 'category') return
 
     const data = node.data as { slug: string; color: string }
@@ -185,8 +200,9 @@ export default function MindmapCanvas({ initialNodes, initialEdges }: MindmapCan
 
       {/* Hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-500 pointer-events-none whitespace-nowrap">
-        {viewMode === 'categories' ? 'Click a category to explore its bookmarks' : 'Drag any bubble · Click ← to go back'}
+        {viewMode === 'categories' ? 'Click a category to explore its bookmarks' : 'Click a bubble to read it · Drag to move · Click ← to go back'}
       </div>
+      {readerBookmark && <TweetReader bookmark={readerBookmark} onClose={() => setReaderBookmark(null)} />}
     </div>
     </MindmapContext.Provider>
   )
