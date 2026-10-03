@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { ftsSearch } from '@/lib/fts'
-import { displayEntities } from '@/lib/rawjson-extractor'
+import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
 import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 import { getActiveModel, getProvider } from '@/lib/settings'
 import { extractKeywords } from '@/lib/search-utils'
@@ -401,21 +401,7 @@ Constraints:
       const b = bookmarkById.get(match.id)
       if (!b) return null
       return {
-        id: b.id,
-        tweetId: b.tweetId,
-        text: b.text,
-        authorHandle: b.authorHandle,
-        authorName: b.authorName,
-        tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
-        importedAt: b.importedAt.toISOString(),
-        ...displayEntities(b.entities),
-        mediaItems: b.mediaItems.map((m) => ({
-          id: m.id, type: m.type, url: m.url, thumbnailUrl: m.thumbnailUrl, imageTags: m.imageTags ?? null,
-        })),
-        categories: b.categories.map((bc) => ({
-          id: bc.category.id, name: bc.category.name, slug: bc.category.slug,
-          color: bc.category.color, confidence: bc.confidence,
-        })),
+        ...toBookmarkWithMedia(b),
         aiScore: matchMap.get(b.id)?.score ?? 0,
         aiReason: matchMap.get(b.id)?.reason ?? '',
       }

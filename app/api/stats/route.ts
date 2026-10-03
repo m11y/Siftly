@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
+import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
 
 export async function GET(): Promise<NextResponse> {
   try {
@@ -46,23 +47,7 @@ export async function GET(): Promise<NextResponse> {
       }),
     ])
 
-    const formattedRecent = recentBookmarks.map((b) => ({
-      id: b.id,
-      tweetId: b.tweetId,
-      text: b.text,
-      authorHandle: b.authorHandle,
-      authorName: b.authorName,
-      tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
-      importedAt: b.importedAt.toISOString(),
-      mediaItems: b.mediaItems,
-      categories: b.categories.map((bc) => ({
-        id: bc.category.id,
-        name: bc.category.name,
-        slug: bc.category.slug,
-        color: bc.category.color,
-        confidence: bc.confidence,
-      })),
-    }))
+    const formattedRecent = recentBookmarks.map(toBookmarkWithMedia)
 
     const topCategories = topCategoriesRaw.map((cat) => ({
       name: cat.name,

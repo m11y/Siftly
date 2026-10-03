@@ -25,6 +25,7 @@ export interface BookmarkWithMedia {
   authorName: string
   tweetCreatedAt: string | null
   importedAt?: string
+  source?: string
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
   links?: TweetLink[]
