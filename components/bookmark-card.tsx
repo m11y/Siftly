@@ -5,7 +5,7 @@ import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, Ima
 import type { BookmarkWithMedia, Category } from '@/lib/types'
 import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
 import TweetReader from '@/components/tweet-reader'
-import { AuthorAvatar, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
+import { AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
@@ -637,11 +637,13 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             <div className="min-w-0">
               {isKnownAuthor && (
                 <p className="text-sm font-semibold text-zinc-100 truncate leading-tight">
-                  {bookmark.authorName}
+                  <ProfileLink handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
                 </p>
               )}
               <p className="text-xs text-zinc-500 truncate">
-                {isKnownAuthor ? `@${bookmark.authorHandle}` : dateStr}
+                {isKnownAuthor
+                  ? <ProfileLink handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>
+                  : dateStr}
                 {bookmark.source === 'quote' && (
                   <span
                     className="ml-1.5 px-1.5 py-px rounded bg-zinc-800 text-[10px] text-zinc-400"

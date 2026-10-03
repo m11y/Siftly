@@ -2,14 +2,30 @@ import React from 'react'
 import type { TweetLink } from '@/lib/types'
 
 const TCO_REGEX = /https?:\/\/t\.co\/\w+/g
+// X handles: 1–15 of [A-Za-z0-9_]; not preceded by a handle char, so e-mail
+// addresses (a@b.com) are left alone.
+const MENTION_REGEX = /(?<![A-Za-z0-9_])@([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])/g
 
-type Segment = { text: string } | { link: TweetLink }
+type Segment = { text: string } | { link: TweetLink } | { mention: string }
+
+function splitMentions(text: string): Segment[] {
+  const out: Segment[] = []
+  let last = 0
+  for (const m of text.matchAll(MENTION_REGEX)) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index) })
+    out.push({ mention: m[1] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push({ text: text.slice(last) })
+  return out
+}
 
 /**
  * Split tweet text the way X renders it: a t.co URL that X expanded (see
  * entities `links`) becomes a link labeled with X's display URL and pointing
  * straight at the target, so no click goes through t.co. Any other t.co URL is
  * the trailing media link and is dropped, since the media renders on its own.
+ * @handles become links to the user's X profile, like on X.
  */
 export function tweetSegments(text: string, links: TweetLink[] = []): Segment[] {
   const byUrl = new Map(links.map((l) => [l.url, l]))
@@ -28,11 +44,14 @@ export function tweetSegments(text: string, links: TweetLink[] = []): Segment[] 
   if (first && 'text' in first) first.text = first.text.trimStart()
   const end = segments[segments.length - 1]
   if (end && 'text' in end) end.text = end.text.trimEnd()
-  return segments.filter((s) => !('text' in s) || s.text)
+  return segments
+    .filter((s) => !('text' in s) || s.text)
+    .flatMap((s) => ('text' in s ? splitMentions(s.text) : [s]))
 }
 
 function segmentLength(s: Segment): number {
-  return 'text' in s ? s.text.length : s.link.displayUrl.length
+  if ('text' in s) return s.text.length
+  return 'link' in s ? s.link.displayUrl.length : s.mention.length + 1
 }
 
 export function tweetTextLength(segments: Segment[]): number {
@@ -47,6 +66,19 @@ export function TweetText({ segments, limit }: { segments: Segment[]; limit?: nu
     if (budget <= 0) break
     if ('text' in s) {
       nodes.push(s.text.slice(0, budget))
+    } else if ('mention' in s) {
+      nodes.push(
+        <a
+          key={i}
+          href={`https://x.com/${s.mention}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-indigo-400 hover:text-indigo-300 hover:underline"
+        >
+          @{s.mention}
+        </a>,
+      )
     } else {
       nodes.push(
         <a
