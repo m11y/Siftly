@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
+import { displayEntities } from '@/lib/rawjson-extractor'
 
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 24
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       source: bookmark.source,
       tweetCreatedAt: bookmark.tweetCreatedAt?.toISOString() ?? null,
       importedAt: bookmark.importedAt.toISOString(),
+      ...displayEntities(bookmark.entities),
       mediaItems: bookmark.mediaItems.map((m) => ({
         id: m.id,
         type: m.type,

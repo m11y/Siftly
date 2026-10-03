@@ -4,7 +4,29 @@
  */
 import prisma from '@/lib/db'
 
+/** A t.co link in the tweet text and what X says it points to. */
+export interface TweetLink {
+  url: string          // the t.co URL as it appears in the text
+  expandedUrl: string
+  displayUrl: string   // X's shortened label, e.g. "bilibili.com/video/BV19…"
+}
+
+export interface QuotedTweet {
+  tweetId: string
+  authorName: string
+  authorHandle: string
+  text: string
+  links: TweetLink[]
+}
+
+/**
+ * Bump when the extracted shape changes: backfillEntities re-extracts rows whose
+ * stored JSON lacks the current marker (rawJson stays the source of truth).
+ */
+export const ENTITIES_VERSION = 2
+
 export interface ExtractedEntities {
+  v: number
   hashtags: string[]
   urls: string[]      // expanded/display URLs from tweet entities
   mentions: string[]  // @handles mentioned
@@ -12,6 +34,8 @@ export interface ExtractedEntities {
   tweetType: 'thread' | 'reply' | 'quote' | 'original'
   hasMedia: boolean
   mediaTypes: string[]
+  links: TweetLink[]   // t.co → expanded URL, so the UI can show links without resolving t.co
+  quoted: QuotedTweet | null
 }
 
 const KNOWN_TOOL_DOMAINS: Record<string, string> = {
@@ -166,6 +190,7 @@ function safeGet(obj: any, ...keys: string[]): any {
 
 export function extractEntities(rawJson: string): ExtractedEntities {
   const empty: ExtractedEntities = {
+    v: ENTITIES_VERSION,
     hashtags: [],
     urls: [],
     mentions: [],
@@ -173,6 +198,8 @@ export function extractEntities(rawJson: string): ExtractedEntities {
     tweetType: 'original',
     hasMedia: false,
     mediaTypes: [],
+    links: [],
+    quoted: null,
   }
 
   if (!rawJson) return empty
@@ -246,7 +273,48 @@ export function extractEntities(rawJson: string): ExtractedEntities {
 
   const tools = detectTools(urls)
 
-  return { hashtags, urls, mentions, tools, tweetType, hasMedia, mediaTypes }
+  return {
+    v: ENTITIES_VERSION,
+    hashtags, urls, mentions, tools, tweetType, hasMedia, mediaTypes,
+    links: extractLinks(urlObjs),
+    quoted: extractQuoted(t),
+  }
+}
+
+function extractLinks(urlObjs: unknown[]): TweetLink[] {
+  return (urlObjs as Record<string, unknown>[])
+    .filter((u) => typeof u.url === 'string' && typeof u.expanded_url === 'string')
+    .map((u) => ({
+      url: String(u.url),
+      expandedUrl: String(u.expanded_url),
+      displayUrl: String(u.display_url ?? u.expanded_url),
+    }))
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractQuoted(t: any): QuotedTweet | null {
+  let q = safeGet(t, 'quoted_status_result', 'result')
+  if (q?.__typename?.startsWith('TweetWithVisibilityResult')) q = q.tweet
+  if (!q?.rest_id || !q.legacy) return null
+  const user = safeGet(q, 'core', 'user_results', 'result')
+  const text: string = safeGet(q, 'note_tweet', 'note_tweet_results', 'result', 'text') ?? q.legacy.full_text ?? ''
+  return {
+    tweetId: String(q.rest_id),
+    authorName: user?.core?.name ?? user?.legacy?.name ?? 'Unknown',
+    authorHandle: user?.core?.screen_name ?? user?.legacy?.screen_name ?? 'unknown',
+    text,
+    links: extractLinks(q.legacy.entities?.urls ?? []),
+  }
+}
+
+/** The display-only part of a stored `entities` JSON (links, quoted tweet). */
+export function displayEntities(entitiesJson: string | null): { links: TweetLink[]; quoted: QuotedTweet | null } {
+  try {
+    const e = entitiesJson ? (JSON.parse(entitiesJson) as Partial<ExtractedEntities>) : {}
+    return { links: e.links ?? [], quoted: e.quoted ?? null }
+  } catch {
+    return { links: [], quoted: null }
+  }
 }
 
 /**
@@ -263,7 +331,7 @@ export async function backfillEntities(
   while (true) {
     if (shouldAbort?.()) break
     const bookmarks = await prisma.bookmark.findMany({
-      where: { entities: null },
+      where: { OR: [{ entities: null }, { NOT: { entities: { contains: `"v":${ENTITIES_VERSION},` } } }] },
       take: CHUNK,
       select: { id: true, rawJson: true },
     })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { ftsSearch } from '@/lib/fts'
+import { displayEntities } from '@/lib/rawjson-extractor'
 import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 import { getActiveModel, getProvider } from '@/lib/settings'
 import { extractKeywords } from '@/lib/search-utils'
@@ -407,6 +408,7 @@ Constraints:
         authorName: b.authorName,
         tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
         importedAt: b.importedAt.toISOString(),
+        ...displayEntities(b.entities),
         mediaItems: b.mediaItems.map((m) => ({
           id: m.id, type: m.type, url: m.url, thumbnailUrl: m.thumbnailUrl, imageTags: m.imageTags ?? null,
         })),

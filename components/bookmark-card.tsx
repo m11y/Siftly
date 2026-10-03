@@ -2,21 +2,17 @@
 
 import React, { useRef, useEffect, useState } from 'react'
 import { ExternalLink, Download, FileText, Play, Pencil, X, Check, ImageOff, Bookmark, Globe } from 'lucide-react'
-import type { BookmarkWithMedia, Category } from '@/lib/types'
+import type { BookmarkWithMedia, Category, QuotedTweet } from '@/lib/types'
+import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
 const URL_REGEX = /https?:\/\/[^\s]+/g
-// Twitter always shortens links to t.co — strip these from display text
+// Twitter always shortens links to t.co
 const TCO_REGEX = /https?:\/\/t\.co\/[^\s]+/g
 
 function extractUrls(text: string): string[] {
   return text.match(URL_REGEX) ?? []
-}
-
-/** Always strip t.co shortlinks — Twitter appends them to every tweet with a link or media */
-function stripTcoUrls(text: string): string {
-  return text.replace(TCO_REGEX, '').trim()
 }
 
 // ── Link preview ───────────────────────────────────────────────────────────────
@@ -393,6 +389,35 @@ function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
   )
 }
 
+// ── Quoted tweet ───────────────────────────────────────────────────────────────
+// Text only for now: the quoted tweet's media is not downloaded or shown.
+
+function QuotedTweetBlock({ quoted }: { quoted: QuotedTweet }) {
+  const url = quoted.authorHandle !== 'unknown'
+    ? `https://x.com/${quoted.authorHandle}/status/${quoted.tweetId}`
+    : `https://x.com/i/web/status/${quoted.tweetId}`
+  const segments = tweetSegments(quoted.text, quoted.links)
+  return (
+    <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-800/30 px-3 py-2">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-baseline gap-1.5 text-xs hover:underline"
+      >
+        <span className="font-semibold text-zinc-300 truncate">{quoted.authorName}</span>
+        <span className="text-zinc-500 truncate">@{quoted.authorHandle}</span>
+      </a>
+      {segments.length > 0 && (
+        <p className="mt-1 text-xs text-zinc-400 leading-relaxed line-clamp-4">
+          <TweetText segments={segments} />
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Category chip ──────────────────────────────────────────────────────────────
 
 function CategoryChip({
@@ -583,15 +608,16 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const dateStr = formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)
   const isKnownAuthor = bookmark.authorHandle !== 'unknown'
 
-  // Always strip t.co shortlinks from display text — Twitter appends them to every tweet
   const tcoUrls = bookmark.text.match(TCO_REGEX) ?? []
-  const cleanText = stripTcoUrls(bookmark.text)
+  // Expanded t.co links render inline like on X; the media t.co is dropped
+  const segments = tweetSegments(bookmark.text, bookmark.links)
+  const textLength = tweetTextLength(segments)
   // Show link preview only when there's no real media attached
   const previewUrl = !hasMedia && tcoUrls.length > 0 ? tcoUrls[tcoUrls.length - 1] : null
 
   const TEXT_LIMIT = 280
-  const isLong = cleanText.length > TEXT_LIMIT
-  const displayText = expanded || !isLong ? cleanText : cleanText.slice(0, TEXT_LIMIT)
+  const isLong = textLength > TEXT_LIMIT
+  const hasText = textLength > 0
 
   const currentCategoryIds = new Set(categories.map((c) => c.id))
 
@@ -748,10 +774,10 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
         </div>
 
         {/* Tweet text */}
-        <div className={`flex-1 ${previewUrl && !displayText ? '' : 'min-h-[4.5rem]'}`}>
-          {displayText.length > 0 && (
+        <div className={`flex-1 ${previewUrl && !hasText ? '' : 'min-h-[4.5rem]'}`}>
+          {hasText && (
             <p className="text-sm text-zinc-200 leading-relaxed">
-              {displayText}
+              <TweetText segments={segments} limit={expanded ? undefined : TEXT_LIMIT} />
               {isLong && !expanded && (
                 <span>
                   {'… '}
@@ -776,11 +802,12 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
               )}
             </p>
           )}
-          {!displayText && !firstMedia && !previewUrl && (
+          {!hasText && !firstMedia && !previewUrl && !bookmark.quoted && (
             <p className="text-xs text-zinc-700 italic">No text content</p>
           )}
+          {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} />}
           {previewUrl && (
-            <LinkPreview url={previewUrl} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} prominent={!displayText} />
+            <LinkPreview url={previewUrl} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} prominent={!hasText} />
           )}
         </div>
 
