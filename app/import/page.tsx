@@ -136,18 +136,28 @@ const BOOKMARKLET_SCRIPT = `(function(){
   }
   window.addEventListener('message',function(e){
     if(e.origin!==SIFTLY||!relay||e.source!==relay||!e.data)return;
-    if(e.data.type==='siftly:ready'){relayReady=true;note='';clearTimeout(readyTimer);render();flush();return;}
+    if(e.data.type==='siftly:ready'){relayReady=true;note='';clearTimeout(readyTimer);render();flush();lookup();return;}
+    if(e.data.type==='siftly:lookupResult'&&lookupInFlight&&e.data.lookupId===lookupInFlight.id){
+      clearTimeout(lookupInFlight.timer);
+      if(e.data.error){lookupInFlight.ids.forEach(function(id){checkedIds.delete(id);});}
+      else{e.data.existing.forEach(function(id){savedIds.add(id);});scheduleScan();}
+      lookupInFlight=null;return;
+    }
     if(e.data.type==='siftly:result'&&inFlight&&e.data.batchId===inFlight.id){
       clearTimeout(inFlight.timer);
       if(e.data.error){queue=inFlight.items.concat(queue);note='入库失败：'+e.data.error;}
       else if(inFlight.source==='complete'){totals.completed+=e.data.updated||0;note='';}
-      else{totals.imported+=e.data.imported||0;totals.updated+=e.data.updated||0;totals.skipped+=e.data.skipped||0;note='';}
+      else{
+        totals.imported+=e.data.imported||0;totals.updated+=e.data.updated||0;totals.skipped+=e.data.skipped||0;note='';
+        inFlight.items.forEach(function(x){savedIds.add(x.tweet.rest_id);});scheduleScan();
+      }
       inFlight=null;render();flush();
     }
   });
 
-  // ── Batching: send whatever has been collected, one batch in flight at a time ──
-  var BATCH=50;
+  // ── Batching: a batch goes out as soon as 5 tweets are queued (the rest on the
+  // 3 s tick), one batch in flight at a time; each batch also kicks the AI pipeline ──
+  var BATCH=5;
   function flush(){
     if(inFlight||!queue.length||!relay||relay.closed||!relayReady)return;
     var source=queue[0].source,items=[],rest=[];
@@ -180,6 +190,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     if(hasArticleBody(t)&&!seenArticles.has(t.rest_id)){seenArticles.add(t.rest_id);queue.push({source:'complete',tweet:t});}
     var source=pageSource();if(!source||seen.has(t.rest_id))return;
     seen.add(t.rest_id);queue.push({source:source,tweet:t});collected++;render();
+    if(queue.length>=BATCH)flush();
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
   function unwrapTweet(t){
@@ -211,6 +222,51 @@ const BOOKMARKLET_SCRIPT = `(function(){
     if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText));}catch(ex){}});}
     return origSend.apply(this,arguments);
   };
+
+  // ── ✓ marks on tweets already in Siftly (any X page, also while paused) ──
+  // X renders each tweet as article[data-testid=tweet] and recycles those nodes
+  // while scrolling, so marks are re-applied from a MutationObserver.
+  var savedIds=new Set(),checkedIds=new Set(),lookupInFlight=null;
+  function articleTweetId(a){
+    var t=a.querySelector('a[href*="/status/"] > time');
+    var href=t&&t.parentElement.getAttribute('href');
+    var m=href&&href.match(/[/]status[/]([0-9]+)/);
+    return m?m[1]:null;
+  }
+  function makeBadge(id){
+    var b=el('span',{display:'inline-flex',alignItems:'center',justifyContent:'center',width:'18px',height:'18px',
+      marginRight:'6px',borderRadius:'50%',background:'#16a34a',color:'#fff',fontSize:'11px',fontWeight:'700',
+      fontFamily:'system-ui,sans-serif',alignSelf:'center',flex:'none'},'✓');
+    b.title='已在 Siftly';b.setAttribute('data-siftly-badge',id);return b;
+  }
+  function scan(){
+    document.querySelectorAll('article[data-testid="tweet"]').forEach(function(a){
+      var id=articleTweetId(a);
+      var old=a.querySelector('[data-siftly-badge]');
+      if(old&&old.getAttribute('data-siftly-badge')!==id){old.remove();old=null;}
+      if(!id)return;
+      if(savedIds.has(id)){
+        var caret=a.querySelector('[data-testid="caret"]');
+        if(!old&&caret&&caret.parentElement)caret.parentElement.insertBefore(makeBadge(id),caret);
+      }else if(!checkedIds.has(id)){pendingLookup.add(id);}
+    });
+  }
+  var pendingLookup=new Set(),scanTimer=null;
+  function scheduleScan(){clearTimeout(scanTimer);scanTimer=setTimeout(scan,150);}
+  function lookup(){
+    if(lookupInFlight||!pendingLookup.size||!relay||relay.closed||!relayReady)return;
+    var ids=Array.from(pendingLookup).slice(0,200);
+    ids.forEach(function(id){pendingLookup.delete(id);checkedIds.add(id);});
+    var id=Date.now()+Math.random();
+    lookupInFlight={id:id,ids:ids,timer:setTimeout(function(){
+      if(lookupInFlight&&lookupInFlight.id===id){ids.forEach(function(x){checkedIds.delete(x);});lookupInFlight=null;}
+    },30000)};
+    relay.postMessage({type:'siftly:lookup',lookupId:id,tweetIds:ids},SIFTLY);
+  }
+  var observer=new MutationObserver(scheduleScan);
+  observer.observe(document.body,{childList:true,subtree:true});
+  var lookupTick=setInterval(lookup,1500);
+  scan();
 
   // ── Auto-scroll ──
   var autoScrolling=false;
@@ -253,7 +309,8 @@ const BOOKMARKLET_SCRIPT = `(function(){
   pauseBtn.onclick=function(){paused=!paused;render();};
   reconnectBtn.onclick=function(){connect();};
   closeBtn.onclick=function(){
-    autoScrolling=false;clearInterval(tick);clearTimeout(readyTimer);
+    autoScrolling=false;clearInterval(tick);clearInterval(lookupTick);clearTimeout(readyTimer);clearTimeout(scanTimer);
+    observer.disconnect();document.querySelectorAll('[data-siftly-badge]').forEach(function(b){b.remove();});
     window.fetch=origFetch;XMLHttpRequest.prototype.open=origOpen;XMLHttpRequest.prototype.send=origSend;
     if(relay&&!relay.closed)relay.postMessage({type:'siftly:bye'},SIFTLY);
     panel.remove();delete window.__siftlyLive;
