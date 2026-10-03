@@ -38,6 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const source = searchParams.get('source')?.trim() ?? ''
   const categorySlug = searchParams.get('category')?.trim() ?? ''
   const mediaType = searchParams.get('mediaType')?.trim() ?? ''
+  const tweetId = searchParams.get('tweetId')?.trim() ?? ''
   const uncategorized = searchParams.get('uncategorized') === 'true'
   const sortParam = searchParams.get('sort')?.trim() ?? 'newest'
   const page = parseIntParam(searchParams.get('page'), DEFAULT_PAGE)
@@ -46,6 +47,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const orderDir = sortParam === 'oldest' ? 'asc' : 'desc'
 
   const where: Record<string, unknown> = {}
+
+  // One bookmark by tweet id (e.g. a mindmap node opening the full-tweet dialog)
+  if (tweetId) where.tweetId = tweetId
 
   if (source === 'bookmark' || source === 'like') {
     where.source = source
