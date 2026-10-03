@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { resolveAnthropicClient, getCliAuthStatus } from '@/lib/claude-cli-auth'
 import { resolveOpenAIClient } from '@/lib/openai-auth'
+import { OpenAIAIClient } from '@/lib/ai-client'
+import { getOpenAIModel } from '@/lib/settings'
 import { resolveMiniMaxClient } from '@/lib/minimax-auth'
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -60,9 +62,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     try {
-      await client.chat.completions.create({
-        model: 'gpt-4.1-mini',
-        max_tokens: 5,
+      // Same path and model the pipeline uses (Responses API; 16 is its minimum cap)
+      await new OpenAIAIClient(client).createMessage({
+        model: await getOpenAIModel(),
+        max_tokens: 16,
         messages: [{ role: 'user', content: 'hi' }],
       })
       return NextResponse.json({ working: true })

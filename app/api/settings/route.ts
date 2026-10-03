@@ -21,6 +21,9 @@ const ALLOWED_OPENAI_MODELS = [
   'gpt-4.1-nano',
   'o4-mini',
   'o3',
+  // DeepSeek models, reached by pointing OPENAI_BASE_URL at https://api.deepseek.com
+  'deepseek-flash',
+  'deepseek-v4-pro',
 ] as const
 
 const ALLOWED_MINIMAX_MODELS = [

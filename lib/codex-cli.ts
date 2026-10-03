@@ -81,6 +81,9 @@ let _cliCheckPromise: Promise<boolean> | null = null
 const CLI_CHECK_TTL_MS = 60_000
 
 export async function getCodexCliAvailability(): Promise<boolean> {
+  // A custom OPENAI_BASE_URL means a non-OpenAI endpoint (e.g. DeepSeek); the
+  // Codex CLI talks to OpenAI and would silently bypass it, so never prefer it.
+  if (process.env.OPENAI_BASE_URL) return false
   const now = Date.now()
   if (_cliAvailable !== null && now - _cliCheckTime < CLI_CHECK_TTL_MS) return _cliAvailable
   if (_cliCheckPromise) return _cliCheckPromise

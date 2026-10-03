@@ -1,6 +1,6 @@
 import prisma from '@/lib/db'
 import { getActiveModel, getProvider } from '@/lib/settings'
-import { AIClient, resolveAIClient } from '@/lib/ai-client'
+import { AIClient, MAX_OUTPUT_TOKENS, resolveAIClient } from '@/lib/ai-client'
 import { getCliAvailability, claudePrompt, modelNameToCliAlias } from '@/lib/claude-cli-auth'
 import { getCodexCliAvailability, codexPrompt } from '@/lib/codex-cli'
 
@@ -165,7 +165,7 @@ async function suggestCategoriesViaSDK(
 
   const response = await client.createMessage({
     model,
-    max_tokens: 4000,
+    max_tokens: MAX_OUTPUT_TOKENS,
     messages: [{ role: 'user', content: prompt }],
   })
 

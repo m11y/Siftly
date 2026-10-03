@@ -3,7 +3,7 @@ import { buildImageContext } from '@/lib/image-context'
 import { getCliAvailability, claudePrompt, modelNameToCliAlias } from '@/lib/claude-cli-auth'
 import { getCodexCliAvailability, codexPrompt } from '@/lib/codex-cli'
 import { getActiveModel, getProvider } from '@/lib/settings'
-import { AIClient } from '@/lib/ai-client'
+import { AIClient, MAX_OUTPUT_TOKENS } from '@/lib/ai-client'
 import { localPathFor } from '@/lib/media-store'
 import { readFile } from 'fs/promises'
 import path from 'path'
@@ -20,7 +20,12 @@ function guessMediaType(url: string, contentTypeHeader: string | null): AllowedM
   return 'image/jpeg'
 }
 
-const MAX_IMAGE_BYTES = 3_500_000 // 3.5MB raw → ~4.7MB base64, under Claude's 5MB limit
+// Per-image size the provider accepts. Anthropic: 5MB per image, so 3.5MB raw
+// (~4.7MB base64). DeepSeek: 32MiB per image and it downscales to ~1300x1300
+// before inference, so a large original costs no more tokens.
+function maxImageBytes(provider: AIClient['provider']): number {
+  return provider === 'anthropic' ? 3_500_000 : 20_000_000
+}
 
 type LocalImage = { data: string; mediaType: AllowedMediaType }
 
@@ -29,7 +34,7 @@ type LocalImage = { data: string; mediaType: AllowedMediaType }
  * never re-downloads from X. 'missing' = not downloaded yet: leave the item
  * unanalyzed so the next run retries after the download stage fetched it.
  */
-async function readLocalImage(filePath: string): Promise<LocalImage | 'missing' | 'unusable'> {
+async function readLocalImage(filePath: string, maxBytes: number): Promise<LocalImage | 'missing' | 'unusable'> {
   let buffer: Buffer
   try {
     buffer = await readFile(filePath)
@@ -37,7 +42,7 @@ async function readLocalImage(filePath: string): Promise<LocalImage | 'missing' 
     return 'missing'
   }
   if (buffer.byteLength < 500) return 'unusable' // tiny/broken file
-  if (buffer.byteLength > MAX_IMAGE_BYTES) {
+  if (buffer.byteLength > maxBytes) {
     console.warn(`[vision] skipping oversized image (${Math.round(buffer.byteLength / 1024)}KB): ${path.basename(filePath)}`)
     return 'unusable'
   }
@@ -110,7 +115,7 @@ async function analyzeImageWithRetry(
   try {
     const response = await client.createMessage({
       model,
-      max_tokens: 700,
+      max_tokens: MAX_OUTPUT_TOKENS,
       messages: [
         {
           role: 'user',
@@ -126,8 +131,11 @@ async function analyzeImageWithRetry(
 
     // Validate it's parseable JSON
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return ''
-    JSON.parse(jsonMatch[0]) // throws if invalid
+    if (!jsonMatch) {
+      console.warn(`[vision] response has no JSON object (${raw.length} chars)`)
+      return ''
+    }
+    JSON.parse(jsonMatch[0]) // throws if invalid (e.g. truncated) — logged below
     return jsonMatch[0]
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
@@ -207,7 +215,7 @@ export async function analyzeItem(
       select: { bookmark: { select: { tweetId: true } } },
     })
     const filePath = row ? localPathFor(row.bookmark.tweetId, imageUrl) : null
-    const img = filePath ? await readLocalImage(filePath) : 'missing'
+    const img = filePath ? await readLocalImage(filePath, maxImageBytes(client.provider)) : 'missing'
     if (img === 'missing') {
       console.warn(`[vision] local file missing, will retry next run: media=${item.id}`)
       return 0
@@ -423,7 +431,7 @@ export async function enrichBatchSemanticTags(
     try {
       const response = await client.createMessage({
         model,
-        max_tokens: 4096,
+        max_tokens: MAX_OUTPUT_TOKENS,
         messages: [{ role: 'user', content: prompt }],
       })
       const results = parseResponse(response.text)
