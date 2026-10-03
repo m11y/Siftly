@@ -1,120 +1,122 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { CheckCircle, Loader2, AlertCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 
-// Popup opened by the bookmarklet from x.com. x.com's CSP (connect-src) blocks
-// requests to this local server, but not opening a window to it, so the
-// bookmarklet hands the captured tweets over via postMessage and this page
-// imports them through its own same-origin API.
+// Relay window opened by the bookmarklet from x.com. x.com's CSP (connect-src,
+// frame-src, form-action) blocks every direct route to this local server, but
+// not opening a window to it, so the bookmarklet streams captured tweets here in
+// batches via postMessage and this page imports them through its own API.
+// It stays open in the background for the whole session; the user never needs
+// to look at it — the live status is the panel the bookmarklet shows on x.com.
 
 const X_ORIGINS = new Set(['https://x.com', 'https://twitter.com'])
+const PIPELINE_POLL_MS = 10_000
 
-type State =
-  | { kind: 'no-opener' }
-  | { kind: 'waiting' }
-  | { kind: 'importing'; count: number }
-  | { kind: 'done'; imported: number; updated: number; skipped: number; pipeline: 'started' | 'busy' | 'skipped' }
-  | { kind: 'error'; message: string }
+interface Totals { batches: number; imported: number; updated: number; skipped: number }
+type Pipeline = 'idle' | 'running' | 'queued'
 
 export default function ReceivePage() {
-  const [state, setState] = useState<State>({ kind: 'waiting' })
+  const [hasOpener, setHasOpener] = useState(true)
+  const [totals, setTotals] = useState<Totals>({ batches: 0, imported: 0, updated: 0, skipped: 0 })
+  const [busy, setBusy] = useState(false)
+  const [pipeline, setPipeline] = useState<Pipeline>('idle')
+  const [error, setError] = useState('')
+  // New rows only join a pipeline run that starts after they are saved, so a
+  // batch that lands while a run is going re-triggers once that run finishes.
+  const runPending = useRef(false)
 
   useEffect(() => {
     const opener = window.opener as Window | null
     if (!opener) {
-      setState({ kind: 'no-opener' })
+      setHasOpener(false)
       return
     }
 
+    async function startPipeline() {
+      try {
+        const res = await fetch('/api/categorize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        // 409 = a run is already going; start another when it ends.
+        runPending.current = !res.ok
+        setPipeline(res.ok ? 'running' : 'queued')
+      } catch {
+        runPending.current = true
+        setPipeline('queued')
+      }
+    }
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch('/api/categorize')
+        const { status } = (await res.json()) as { status: string }
+        if (status === 'idle') {
+          if (runPending.current) await startPipeline()
+          else setPipeline('idle')
+        }
+      } catch { /* Siftly restarting; try again next tick */ }
+    }, PIPELINE_POLL_MS)
+
     async function onMessage(e: MessageEvent) {
       if (!X_ORIGINS.has(e.origin) || e.source !== opener) return
-      const data = e.data as { type?: string; source?: string; tweets?: unknown[] } | null
+      const data = e.data as { type?: string; batchId?: number; source?: string; tweets?: unknown[] } | null
+      if (data?.type === 'siftly:bye') { window.close(); return }
       if (data?.type !== 'siftly:import' || !Array.isArray(data.tweets)) return
-      window.removeEventListener('message', onMessage)
 
-      setState({ kind: 'importing', count: data.tweets.length })
+      setBusy(true)
       try {
         const res = await fetch('/api/import/bookmarklet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ source: data.source, tweets: data.tweets }),
         })
-        const result = await res.json() as { imported?: number; updated?: number; skipped?: number; error?: string }
+        const result = (await res.json()) as { imported?: number; updated?: number; skipped?: number; error?: string }
         if (!res.ok) throw new Error(result.error ?? `Import failed (${res.status})`)
         const imported = result.imported ?? 0
         const updated = result.updated ?? 0
         const skipped = result.skipped ?? 0
-        opener?.postMessage({ type: 'siftly:result', imported, updated, skipped }, e.origin)
-
-        // The import already succeeded and was reported; a pipeline hiccup must not
-        // reach the catch below, or the bookmarklet would also download a fallback file.
-        let pipeline: 'started' | 'busy' | 'skipped' = 'skipped'
-        if (imported > 0 || updated > 0) {
-          try {
-            const cat = await fetch('/api/categorize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: '{}',
-            })
-            // 409 = a run is already going; new rows wait for the next run.
-            pipeline = cat.ok ? 'started' : 'busy'
-          } catch {
-            pipeline = 'busy'
-          }
-        }
-        setState({ kind: 'done', imported, updated, skipped, pipeline })
+        opener?.postMessage({ type: 'siftly:result', batchId: data.batchId, imported, updated, skipped }, e.origin)
+        setTotals((t) => ({ batches: t.batches + 1, imported: t.imported + imported, updated: t.updated + updated, skipped: t.skipped + skipped }))
+        setError('')
+        if (imported > 0 || updated > 0) await startPipeline()
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        opener?.postMessage({ type: 'siftly:result', error: message }, e.origin)
-        setState({ kind: 'error', message })
+        opener?.postMessage({ type: 'siftly:result', batchId: data.batchId, error: message }, e.origin)
+        setError(message)
+      } finally {
+        setBusy(false)
       }
     }
 
     window.addEventListener('message', onMessage)
     // The opener's exact origin is unknown here; postMessage drops non-matching targets.
     for (const origin of X_ORIGINS) opener.postMessage({ type: 'siftly:ready' }, origin)
-    return () => window.removeEventListener('message', onMessage)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      clearInterval(poll)
+    }
   }, [])
 
+  if (!hasOpener) {
+    return (
+      <div className="p-6 text-sm text-zinc-400">
+        This window relays tweets from the Siftly bookmarklet. Run the bookmarklet on your X likes or bookmarks page.
+      </div>
+    )
+  }
+
   return (
-    <div className="p-8 max-w-lg mx-auto">
-      <h1 className="text-xl font-bold text-zinc-100 mb-6">Import from X</h1>
-      {state.kind === 'no-opener' && (
-        <p className="text-sm text-zinc-400">
-          This page receives tweets from the Siftly bookmarklet. Run the bookmarklet on x.com and click its
-          purple Send button.
-        </p>
-      )}
-      {state.kind === 'waiting' && (
-        <p className="flex items-center gap-2 text-sm text-zinc-400">
-          <Loader2 size={16} className="animate-spin" /> Waiting for tweets from x.com…
-        </p>
-      )}
-      {state.kind === 'importing' && (
-        <p className="flex items-center gap-2 text-sm text-zinc-400">
-          <Loader2 size={16} className="animate-spin" /> Importing {state.count} tweets…
-        </p>
-      )}
-      {state.kind === 'done' && (
-        <div className="space-y-3 text-sm">
-          <p className="flex items-center gap-2 text-emerald-400">
-            <CheckCircle size={16} /> Imported {state.imported} new, refreshed {state.updated} older imports, skipped {state.skipped} already saved.
-          </p>
-          {state.pipeline === 'started' && <p className="text-zinc-400">AI pipeline started.</p>}
-          {state.pipeline === 'busy' && (
-            <p className="text-zinc-400">
-              The AI pipeline did not start (a run may already be in progress). New items are processed on the next run.
-            </p>
-          )}
-          <a href="/categorize" className="inline-block text-indigo-400 hover:underline">View pipeline progress →</a>
-        </div>
-      )}
-      {state.kind === 'error' && (
-        <p className="flex items-center gap-2 text-sm text-red-400">
-          <AlertCircle size={16} /> {state.message}
-        </p>
-      )}
+    <div className="p-5 space-y-2 text-sm">
+      <p className="font-semibold text-zinc-100 flex items-center gap-2">
+        Siftly 中转窗口 {busy && <Loader2 size={14} className="animate-spin text-indigo-400" />}
+      </p>
+      <p className="text-xs text-zinc-500">保持打开，放到后台即可；状态看 x.com 右上角的面板。</p>
+      <p className="text-zinc-300">
+        {totals.batches} 批 · 新增 {totals.imported} · 刷新 {totals.updated} · 已有 {totals.skipped}
+      </p>
+      <p className="text-xs text-zinc-500">
+        AI 处理：{pipeline === 'running' ? '进行中' : pipeline === 'queued' ? '排队，当前一轮结束后开始' : '空闲'}
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   )
 }

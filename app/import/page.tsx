@@ -71,40 +71,105 @@ const STAGE_INFO: Record<NonNullable<Stage>, { label: string; icon: React.ReactN
 
 // ── Bookmarklet script (captures Twitter/X bookmark API responses as you scroll) ──
 
-const BOOKMARKLET_SCRIPT = `(async function(){
-  if(!location.hostname.includes('twitter.com')&&!location.hostname.includes('x.com')){
-    showToast('\u274c Please navigate to x.com/i/bookmarks or x.com/username/likes first','#ef4444');return;
-  }
+const BOOKMARKLET_SCRIPT = `(function(){
+  var host=location.hostname;
+  if(!(host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com'))){alert('Siftly: 请在 x.com 的点赞页或书签页使用');return;}
   // Replaced with the Siftly page's own origin when the bookmarklet link is rendered.
   var SIFTLY='__SIFTLY_ORIGIN__';
-  var isLikes=location.pathname.includes('/likes');
-  var source=isLikes?'like':'bookmark';
-  var label=isLikes?'likes':'bookmarks';
-  function showToast(msg,bg){
-    var t=document.createElement('div');t.textContent=msg;
-    Object.assign(t.style,{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',
-      zIndex:'2147483647',padding:'10px 18px',background:bg||'#1e1b4b',color:'#fff',
-      border:'1px solid rgba(255,255,255,0.15)',borderRadius:'8px',
-      fontSize:'13px',fontWeight:'600',fontFamily:'system-ui,sans-serif',
-      boxShadow:'0 4px 20px rgba(0,0,0,0.6)',whiteSpace:'nowrap',transition:'opacity 0.3s'});
-    document.body.appendChild(t);
-    setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},4000);
+  if(window.__siftlyLive){window.__siftlyLive.reconnect();return;}
+  var Z='2147483647';
+  // X is a single-page app: capture only while the current page is a likes or bookmarks timeline.
+  function pageSource(){
+    var parts=location.pathname.split('/').filter(Boolean);
+    if(parts.length===2&&parts[1]==='likes')return 'like';
+    if(parts[0]==='i'&&parts[1]==='bookmarks')return 'bookmark';
+    return null;
   }
-  var all=[],seen=new Set();
-  var btn=document.createElement('button');
-  btn.textContent='Scroll, then Send 0 '+label+' to Siftly \u2192';
-  Object.assign(btn.style,{position:'fixed',top:'12px',right:'12px',zIndex:'2147483647',
-    padding:'10px 18px',background:'#4f46e5',color:'#fff',border:'none',borderRadius:'8px',
-    cursor:'pointer',fontSize:'14px',fontWeight:'700',
-    boxShadow:'0 0 0 2px rgba(99,102,241,.4),0 4px 16px rgba(0,0,0,.4)',
-    fontFamily:'system-ui,sans-serif'});
+  var seen=new Set(),queue=[],inFlight=null,paused=false,collected=0;
+  var totals={imported:0,updated:0,skipped:0};
+  var relay=null,relayReady=false,note='';
+
+  // ── Panel: fixed top-right, above everything on x.com ──
+  function el(tag,style,text){var e=document.createElement(tag);if(style)Object.assign(e.style,style);if(text!=null)e.textContent=text;return e;}
+  var panel=el('div',{position:'fixed',top:'12px',right:'12px',zIndex:Z,width:'236px',padding:'10px 12px',
+    background:'#18181b',color:'#e4e4e7',border:'1px solid #3f3f46',borderRadius:'10px',
+    boxShadow:'0 6px 24px rgba(0,0,0,.45)',fontFamily:'system-ui,sans-serif',fontSize:'12px',lineHeight:'1.5'});
+  var head=el('div',{display:'flex',alignItems:'center',gap:'6px'});
+  var dot=el('span',{width:'8px',height:'8px',borderRadius:'50%',background:'#a1a1aa',flex:'none'});
+  var title=el('span',{fontWeight:'700',flex:'1'},'Siftly');
+  function iconBtn(text,tip){var b=el('button',{background:'none',border:'none',color:'#a1a1aa',cursor:'pointer',fontSize:'13px',padding:'0 2px'},text);b.title=tip;return b;}
+  var pauseBtn=iconBtn('⏸','暂停收集'),closeBtn=iconBtn('✕','关闭并停止收集');
+  head.append(dot,title,pauseBtn,closeBtn);
+  var line1=el('div',{marginTop:'4px'}),line2=el('div',{color:'#a1a1aa'}),line3=el('div',{color:'#fbbf24'});
+  var actions=el('div',{display:'flex',gap:'6px',marginTop:'6px'});
+  function textBtn(text){return el('button',{flex:'1',padding:'4px 0',background:'#27272a',color:'#d4d4d8',border:'1px solid #3f3f46',borderRadius:'6px',cursor:'pointer',fontSize:'12px'},text);}
+  var autoBtn=textBtn('▶ Auto-scroll'),reconnectBtn=textBtn('重新连接');
+  actions.append(autoBtn,reconnectBtn);
+  panel.append(head,line1,line2,line3,actions);
+  document.body.appendChild(panel);
+
+  function render(){
+    var connected=relay&&!relay.closed&&relayReady;
+    var connecting=relay&&!relay.closed&&!relayReady;
+    dot.style.background=paused?'#a1a1aa':connected?'#22c55e':connecting?'#f59e0b':'#ef4444';
+    title.textContent='Siftly '+(paused?'已暂停':connected?'已连接':connecting?'连接中…':'已断开');
+    pauseBtn.textContent=paused?'▶':'⏸';pauseBtn.title=paused?'继续收集':'暂停收集';
+    line1.textContent='已收集 '+collected+' · 新增 '+totals.imported+' · 刷新 '+totals.updated;
+    line2.textContent='已存在 '+totals.skipped+' · 待发送 '+(queue.length+(inFlight?inFlight.items.length:0));
+    var hint=note||(pageSource()?'':'当前页面不收集（仅点赞页、书签页）');
+    line3.textContent=hint;line3.style.display=hint?'block':'none';
+    reconnectBtn.style.display=connected||connecting?'none':'block';
+  }
+
+  // ── Relay window: the only route to Siftly that x.com's CSP allows ──
+  var readyTimer=null;
+  function connect(){
+    var w=360,h=220;
+    var left=(screen.availLeft||0)+screen.availWidth-w-24,top=(screen.availTop||0)+screen.availHeight-h-48;
+    relay=window.open(SIFTLY+'/import/receive','siftly-relay','popup,width='+w+',height='+h+',left='+left+',top='+top);
+    relayReady=false;
+    note=relay?'':'弹窗被拦截：允许 x.com 弹窗后点“重新连接”';
+    clearTimeout(readyTimer);
+    if(relay)readyTimer=setTimeout(function(){if(!relayReady){note='Siftly 无响应（'+SIFTLY+'），确认服务在运行后点“重新连接”';render();}},20000);
+    render();
+  }
+  window.addEventListener('message',function(e){
+    if(e.origin!==SIFTLY||!relay||e.source!==relay||!e.data)return;
+    if(e.data.type==='siftly:ready'){relayReady=true;note='';clearTimeout(readyTimer);render();flush();return;}
+    if(e.data.type==='siftly:result'&&inFlight&&e.data.batchId===inFlight.id){
+      clearTimeout(inFlight.timer);
+      if(e.data.error){queue=inFlight.items.concat(queue);note='入库失败：'+e.data.error;}
+      else{totals.imported+=e.data.imported||0;totals.updated+=e.data.updated||0;totals.skipped+=e.data.skipped||0;note='';}
+      inFlight=null;render();flush();
+    }
+  });
+
+  // ── Batching: send whatever has been collected, one batch in flight at a time ──
+  var BATCH=50;
+  function flush(){
+    if(inFlight||!queue.length||!relay||relay.closed||!relayReady)return;
+    var source=queue[0].source,items=[],rest=[];
+    for(var i=0;i<queue.length;i++){if(items.length<BATCH&&queue[i].source===source)items.push(queue[i]);else rest.push(queue[i]);}
+    queue=rest;
+    var id=Date.now()+Math.random();
+    inFlight={id:id,items:items,timer:setTimeout(function(){
+      if(inFlight&&inFlight.id===id){queue=inFlight.items.concat(queue);inFlight=null;note='发送超时，稍后重试';render();}
+    },60000)};
+    relay.postMessage({type:'siftly:import',batchId:id,source:source,tweets:items.map(function(x){return x.tweet;})},SIFTLY);
+    render();
+  }
+  var tick=setInterval(function(){
+    if(relay&&relay.closed&&relayReady){relayReady=false;}
+    flush();render();
+  },3000);
+
+  // ── Capture: read X's own timeline responses as they load ──
   // Keep the raw GraphQL tweet: only it carries the full text of long posts
-  // (note_tweet) and X Articles. Siftly parses it server-side.
+  // (note_tweet), X Articles and quoted tweets. Siftly parses it server-side.
   function addTweet(t){
-    if(!t||!t.rest_id||seen.has(t.rest_id))return;
-    seen.add(t.rest_id);
-    all.push(t);
-    btn.textContent='Send '+all.length+' '+label+' to Siftly \u2192';
+    if(paused||!t||!t.rest_id||seen.has(t.rest_id))return;
+    var source=pageSource();if(!source)return;
+    seen.add(t.rest_id);queue.push({source:source,tweet:t});collected++;render();
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
   function unwrapTweet(t){
@@ -119,101 +184,6 @@ const BOOKMARKLET_SCRIPT = `(async function(){
     for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)){deepFindTweets(obj[k],depth+1);}}
   }
   function processData(d){deepFindTweets(d,0);}
-  var autoBtn=document.createElement('button');
-  function finish(){
-    window.fetch=origFetch;
-    XMLHttpRequest.prototype.open=origOpen;
-    XMLHttpRequest.prototype.send=origSend;
-    [btn,autoBtn].forEach(function(el){try{document.body.removeChild(el);}catch(e){}});
-  }
-  // Fallback when the Siftly popup cannot be reached: upload this file on the Import page.
-  function downloadJson(){
-    var blob=new Blob([JSON.stringify({source:source,tweets:all})],{type:'application/json'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');a.href=url;a.download=source+'s.json';a.click();
-    setTimeout(function(){URL.revokeObjectURL(url);},1000);
-  }
-  function fallback(msg){
-    finish();downloadJson();
-    showToast(msg+' \u2014 downloaded '+source+'s.json instead; upload it on Siftly\u2019s Import page.','#92400e');
-  }
-  // x.com's CSP blocks fetch() to the local server, so open a Siftly popup and
-  // hand the tweets over with postMessage; the popup imports them same-origin.
-  function doExport(){
-    if(!all.length){showToast('\u26a0\ufe0f No '+label+' captured \u2014 scroll or use Auto-scroll first!','#92400e');return;}
-    var w=window.open(SIFTLY+'/import/receive','siftly-import');
-    if(!w){fallback('\u26a0\ufe0f Popup blocked');return;}
-    var sent=false;
-    var timer=setTimeout(function(){window.removeEventListener('message',onMsg);fallback('\u26a0\ufe0f Siftly at '+SIFTLY+' did not respond');},20000);
-    function onMsg(e){
-      if(e.origin!==SIFTLY||e.source!==w||!e.data)return;
-      if(e.data.type==='siftly:ready'&&!sent){
-        sent=true;clearTimeout(timer);
-        w.postMessage({type:'siftly:import',source:source,tweets:all},SIFTLY);
-        showToast('\u23f3 Sending '+all.length+' '+label+' to Siftly\u2026','#1e1b4b');
-      }else if(e.data.type==='siftly:result'){
-        window.removeEventListener('message',onMsg);
-        if(e.data.error){fallback('\u274c Siftly import failed: '+e.data.error);return;}
-        finish();
-        showToast('\u2705 Siftly imported '+e.data.imported+' new '+label+', refreshed '+(e.data.updated||0)+', '+e.data.skipped+' already saved','#14532d');
-      }
-    }
-    window.addEventListener('message',onMsg);
-  }
-  btn.onclick=doExport;
-  autoBtn.textContent='\u25b6 Auto-scroll';
-  Object.assign(autoBtn.style,{position:'fixed',top:'58px',right:'12px',zIndex:'2147483647',
-    padding:'8px 14px',background:'#18181b',color:'#a1a1aa',
-    border:'1px solid #3f3f46',borderRadius:'8px',
-    cursor:'pointer',fontSize:'12px',fontWeight:'600',fontFamily:'system-ui,sans-serif'});
-  var autoScrolling=false;
-  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
-  async function runAutoScroll(){
-    var stagnant=0,lastCount=all.length;
-    while(autoScrolling){
-      window.scrollTo(0,document.documentElement.scrollHeight);
-      var col=document.querySelector('[data-testid="primaryColumn"]');
-      if(col)col.scrollTo(0,col.scrollHeight);
-      await sleep(900);
-      if(all.length>lastCount){stagnant=0;lastCount=all.length;}
-      else{
-        stagnant++;
-        // Loading often pauses for many seconds (rate limits, slow fetches);
-        // nudge the timeline up and back down to retrigger loading instead of giving up.
-        if(stagnant%10===0&&stagnant<40){
-          window.scrollTo(0,Math.max(0,document.documentElement.scrollHeight-2600));
-          if(col)col.scrollTo(0,Math.max(0,col.scrollHeight-2600));
-          await sleep(1200);
-          window.scrollTo(0,document.documentElement.scrollHeight);
-          if(col)col.scrollTo(0,col.scrollHeight);
-          await sleep(3000);
-        }
-        if(stagnant>=40){
-          window.scrollTo(0,document.documentElement.scrollHeight);
-          await sleep(5000);
-          if(all.length===lastCount){
-            autoScrolling=false;
-            autoBtn.textContent='\u2705 Done \u2014 '+all.length+' captured';
-            autoBtn.style.background='#14532d';autoBtn.style.color='#86efac';autoBtn.style.border='1px solid #166534';
-            showToast('\u2705 Auto-scroll complete! '+all.length+' '+label+' ready. Click Send.','#14532d');
-            return;
-          }
-          stagnant=0;
-        }
-      }
-    }
-    autoBtn.textContent='\u25b6 Auto-scroll';
-    autoBtn.style.background='#18181b';autoBtn.style.color='#a1a1aa';autoBtn.style.border='1px solid #3f3f46';
-  }
-  autoBtn.onclick=function(){
-    if(autoScrolling){autoScrolling=false;return;}
-    autoScrolling=true;
-    autoBtn.textContent='\u23f8 Stop';
-    autoBtn.style.background='#4f46e5';autoBtn.style.color='#fff';autoBtn.style.border='none';
-    runAutoScroll();
-  };
-  document.body.appendChild(btn);
-  document.body.appendChild(autoBtn);
   function isApiUrl(u){return u.includes('/graphql/')||u.includes('/i/api/')||u.includes('/2/timeline');}
   var origFetch=window.fetch;
   window.fetch=async function(){
@@ -231,7 +201,55 @@ const BOOKMARKLET_SCRIPT = `(async function(){
     if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText));}catch(ex){}});}
     return origSend.apply(this,arguments);
   };
-  showToast('\u2705 Active! Scroll your '+label+' \u2014 counter updates above.','#1e1b4b');
+
+  // ── Auto-scroll ──
+  var autoScrolling=false;
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+  async function runAutoScroll(){
+    var stagnant=0,lastCount=collected;
+    while(autoScrolling){
+      window.scrollTo(0,document.documentElement.scrollHeight);
+      var col=document.querySelector('[data-testid="primaryColumn"]');
+      if(col)col.scrollTo(0,col.scrollHeight);
+      await sleep(900);
+      if(collected>lastCount){stagnant=0;lastCount=collected;}
+      else{
+        stagnant++;
+        // Loading often pauses for many seconds (rate limits, slow fetches);
+        // nudge the timeline up and back down to retrigger loading instead of giving up.
+        if(stagnant%10===0&&stagnant<40){
+          window.scrollTo(0,Math.max(0,document.documentElement.scrollHeight-2600));
+          if(col)col.scrollTo(0,Math.max(0,col.scrollHeight-2600));
+          await sleep(1200);
+          window.scrollTo(0,document.documentElement.scrollHeight);
+          if(col)col.scrollTo(0,col.scrollHeight);
+          await sleep(3000);
+        }
+        if(stagnant>=40){
+          window.scrollTo(0,document.documentElement.scrollHeight);
+          await sleep(5000);
+          if(collected===lastCount){autoScrolling=false;autoBtn.textContent='✅ 到底了';return;}
+          stagnant=0;
+        }
+      }
+    }
+    autoBtn.textContent='▶ Auto-scroll';
+  }
+  autoBtn.onclick=function(){
+    if(autoScrolling){autoScrolling=false;return;}
+    autoScrolling=true;autoBtn.textContent='⏸ 停止滚动';runAutoScroll();
+  };
+
+  pauseBtn.onclick=function(){paused=!paused;render();};
+  reconnectBtn.onclick=function(){connect();};
+  closeBtn.onclick=function(){
+    autoScrolling=false;clearInterval(tick);clearTimeout(readyTimer);
+    window.fetch=origFetch;XMLHttpRequest.prototype.open=origOpen;XMLHttpRequest.prototype.send=origSend;
+    if(relay&&!relay.closed)relay.postMessage({type:'siftly:bye'},SIFTLY);
+    panel.remove();delete window.__siftlyLive;
+  };
+  window.__siftlyLive={reconnect:function(){if(!relay||relay.closed)connect();}};
+  connect();
 })();`
 
 function noopSubscribe(): () => void {
@@ -564,27 +582,19 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
       title: `Click "Export X Bookmarks" in your bookmark bar`,
       content: (
         <p className="text-xs text-zinc-500 mt-1">
-          A purple Send button will appear on the page
+          A small Siftly panel appears at the top right of X, and a small Siftly relay window opens. Click back on X;
+          the relay window can stay behind it — just don&apos;t close it.
         </p>
       ),
     },
     {
       num: 4,
-      title: 'Click "▶ Auto-scroll" to capture all bookmarks automatically',
+      title: `Scroll your ${sourceLabel} — that's it`,
       content: (
         <p className="text-xs text-zinc-500 mt-1">
-          A second button appears below the Send button. Click it and it will scroll through all your bookmarks automatically — stopping when done. Or scroll manually if you prefer.
-        </p>
-      ),
-    },
-    {
-      num: 5,
-      title: `Click the purple "Send N ${sourceLabel} to Siftly" button`,
-      content: (
-        <p className="text-xs text-zinc-500 mt-1">
-          A Siftly window opens and imports them directly, then starts the AI pipeline. If that window is blocked or
-          Siftly is unreachable, a <code className="text-xs bg-zinc-800 px-1 py-0.5 rounded">{sourceLabel}.json</code>{' '}
-          file downloads instead — upload it below.
+          Everything that loads is collected and sent to Siftly every few seconds; the panel shows the counts and the
+          AI pipeline starts on its own. Use ▶ Auto-scroll to go through everything, ⏸ to pause, ✕ to stop. If the relay
+          window was closed, click &quot;重新连接&quot; in the panel.
         </p>
       ),
     },
