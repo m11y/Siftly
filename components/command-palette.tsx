@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search, X, ArrowRight, Loader2 } from 'lucide-react'
 import type { BookmarkWithMedia } from '@/lib/types'
+import TweetReader from '@/components/tweet-reader'
+import { isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 interface SearchResult extends BookmarkWithMedia {
   total?: number
@@ -16,6 +18,11 @@ export default function CommandPalette() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(0)
+  // Result previewed in Siftly's full-tweet dialog, on top of the palette.
+  // Closing it returns to the same query, results and selection.
+  const [readerBookmark, setReaderBookmark] = useState<BookmarkWithMedia | null>(null)
+  const readerOpen = useRef(false)
+  useEffect(() => { readerOpen.current = readerBookmark !== null }, [readerBookmark])
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const router = useRouter()
@@ -27,7 +34,8 @@ export default function CommandPalette() {
         e.preventDefault()
         setOpen((v) => !v)
       }
-      if (e.key === 'Escape') setOpen(false)
+      // Esc while previewing closes only the preview (TweetReader handles it)
+      if (e.key === 'Escape' && !readerOpen.current) setOpen(false)
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
@@ -85,22 +93,28 @@ export default function CommandPalette() {
           setOpen(false)
         }
       } else if (results[selected]) {
-        router.push(`/bookmarks?q=${encodeURIComponent(query.trim())}`)
-        setOpen(false)
+        openBookmark(results[selected])
       }
     }
   }
 
-  function openBookmarkUrl(b: BookmarkWithMedia) {
-    const url = `https://twitter.com/${b.authorHandle}/status/${b.tweetId}`
-    window.open(url, '_blank', 'noopener noreferrer')
-    setOpen(false)
+  function openBookmark(b: BookmarkWithMedia) {
+    inputRef.current?.blur() // keys go to the preview, not the result list
+    setReaderBookmark(b)
   }
 
-  if (!open) return null
+  function closePreview() {
+    setReaderBookmark(null)
+    inputRef.current?.focus()
+  }
+
+  const reader = readerBookmark && <TweetReader bookmark={readerBookmark} onClose={closePreview} />
+
+  if (!open) return reader
 
   return (
     <>
+      {reader}
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
@@ -143,7 +157,9 @@ export default function CommandPalette() {
           {results.length > 0 && (
             <ul className="max-h-96 overflow-y-auto py-2">
               {results.map((b, i) => {
-                const thumb = b.mediaItems[0]?.thumbnailUrl ?? (b.mediaItems[0]?.type === 'photo' ? b.mediaItems[0]?.url : null)
+                // Old imports stored a video's mp4 as its thumbnail; an <img> can't show it.
+                const rawThumb = b.mediaItems[0]?.thumbnailUrl ?? (b.mediaItems[0]?.type === 'photo' ? b.mediaItems[0]?.url : null)
+                const thumb = rawThumb && !isVideoUrl(rawThumb) ? proxyUrl(rawThumb, b.tweetId) : null
                 const isSelected = i === selected
                 return (
                   <li key={b.id}>
@@ -151,7 +167,7 @@ export default function CommandPalette() {
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                         isSelected ? 'bg-zinc-800' : 'hover:bg-zinc-800/60'
                       }`}
-                      onClick={() => openBookmarkUrl(b)}
+                      onClick={() => openBookmark(b)}
                       onMouseEnter={() => setSelected(i)}
                     >
                       {/* Thumbnail or icon */}
