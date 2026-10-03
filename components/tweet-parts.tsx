@@ -153,14 +153,23 @@ function QuotedMediaThumb({ item, tweetId, extra }: { item: MediaItem; tweetId: 
   )
 }
 
-function QuotedMediaGrid({ media, tweetId }: { media: MediaItem[]; tweetId: string }) {
+type OpenPhotos = (srcs: string[], index: number) => void
+
+function QuotedMediaGrid({ media, tweetId, onOpenPhotos }: { media: MediaItem[]; tweetId: string; onOpenPhotos?: OpenPhotos }) {
+  const photoSrcs = media.filter((m) => m.type === 'photo').map((m) => proxyUrl(m.url, tweetId))
   return (
     <div className={`mt-2 grid gap-1.5 ${media.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
       {media.map((m) => m.type === 'photo' ? (
-        <a key={m.id} href={proxyUrl(m.url, tweetId)} target="_blank" rel="noopener noreferrer" title="Open full size">
+        <button
+          key={m.id}
+          type="button"
+          onClick={() => onOpenPhotos?.(photoSrcs, photoSrcs.indexOf(proxyUrl(m.url, tweetId)))}
+          className="block cursor-zoom-in"
+          title="View full size"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={proxyUrl(m.url, tweetId)} alt="" className="w-full max-h-60 object-contain rounded-lg bg-black" loading="lazy" />
-        </a>
+        </button>
       ) : (
         <video
           key={m.id}
@@ -179,7 +188,7 @@ function QuotedMediaGrid({ media, tweetId }: { media: MediaItem[]; tweetId: stri
   )
 }
 
-export function QuotedTweetBlock({ quoted, full = false }: { quoted: QuotedTweetView; full?: boolean }) {
+export function QuotedTweetBlock({ quoted, full = false, onOpenPhotos }: { quoted: QuotedTweetView; full?: boolean; onOpenPhotos?: OpenPhotos }) {
   const segments = tweetSegments(quoted.text, quoted.links)
   const media = quoted.media ?? []
   const header = (
@@ -205,7 +214,7 @@ export function QuotedTweetBlock({ quoted, full = false }: { quoted: QuotedTweet
         <>
           {header}
           {text}
-          {media.length > 0 && <QuotedMediaGrid media={media} tweetId={quoted.tweetId} />}
+          {media.length > 0 && <QuotedMediaGrid media={media} tweetId={quoted.tweetId} onOpenPhotos={onOpenPhotos} />}
         </>
       ) : (
         <div className="flex gap-2.5">

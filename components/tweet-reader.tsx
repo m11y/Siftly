@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
+import MediaLightbox, { type LightboxState } from '@/components/media-lightbox'
 import { AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
@@ -21,8 +22,13 @@ export default function TweetReader({
   categories?: BookmarkCategory[]
   onClose: () => void
 }) {
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null)
+  // Esc while the lightbox is open closes only the lightbox, not this dialog.
+  const lightboxOpen = useRef(false)
+  useEffect(() => { lightboxOpen.current = lightbox !== null }, [lightbox])
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !lightboxOpen.current) onClose() }
     document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -38,6 +44,7 @@ export default function TweetReader({
     : `https://x.com/i/web/status/${bookmark.tweetId}`
   const segments = tweetSegments(bookmark.text, bookmark.links)
   const media = bookmark.mediaItems
+  const photoSrcs = media.filter((m) => m.type === 'photo').map((m) => proxyUrl(m.url, bookmark.tweetId))
 
   return createPortal(
     <div
@@ -95,12 +102,12 @@ export default function TweetReader({
           {media.length > 0 && (
             <div className={`grid gap-2 ${media.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
               {media.map((m) => m.type === 'photo' ? (
-                <a
+                <button
                   key={m.id}
-                  href={proxyUrl(m.url, bookmark.tweetId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open full size"
+                  type="button"
+                  onClick={() => setLightbox({ srcs: photoSrcs, index: photoSrcs.indexOf(proxyUrl(m.url, bookmark.tweetId)) })}
+                  className="block cursor-zoom-in"
+                  title="View full size"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -109,7 +116,7 @@ export default function TweetReader({
                     className="w-full max-h-[70vh] object-contain rounded-xl bg-black"
                     loading="lazy"
                   />
-                </a>
+                </button>
               ) : (
                 <video
                   key={m.id}
@@ -127,7 +134,7 @@ export default function TweetReader({
             </div>
           )}
 
-          {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} full />}
+          {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} full onOpenPhotos={(srcs, index) => setLightbox({ srcs, index })} />}
           {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
 
           {categories.length > 0 && (
@@ -144,6 +151,9 @@ export default function TweetReader({
             </div>
           )}
         </div>
+        {/* Inside the dialog box: the lightbox portals elsewhere, but React bubbles
+            its clicks through here, and this box stops them before the backdrop. */}
+        <MediaLightbox state={lightbox} onClose={() => setLightbox(null)} />
       </div>
     </div>,
     document.body,
