@@ -19,7 +19,7 @@ import {
 import * as Select from '@radix-ui/react-select'
 import BookmarkCard from '@/components/bookmark-card'
 import BookmarkRow from '@/components/bookmark-row'
-import BookmarkDetailModal from '@/components/bookmark-detail-modal'
+import TweetReader from '@/components/tweet-reader'
 import type { BookmarkWithMedia, BookmarksResponse } from '@/lib/types'
 
 const DEFAULT_PAGE_SIZE = 24
@@ -498,7 +498,7 @@ function BookmarksPageInner() {
       </div>
 
       {openBookmark && (
-        <BookmarkDetailModal
+        <TweetReader
           bookmark={openBookmark}
           onClose={() => setOpenBookmark(null)}
         />
