@@ -29,7 +29,16 @@ export interface BookmarkWithMedia {
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
   links?: TweetLink[]
-  quoted?: QuotedTweet | null
+  /** Tweet this one quotes; set even when its content is unknown (link to X then). */
+  quotedTweetId?: string | null
+  quoted?: QuotedTweetView | null
+}
+
+/** A quoted tweet as shown inside another card: its own row when saved, else a snapshot. */
+export interface QuotedTweetView extends QuotedTweet {
+  media?: MediaItem[]
+  /** The tweet the quoted tweet itself quotes (X sends only its id). */
+  quotedTweetId?: string | null
 }
 
 export interface Category {

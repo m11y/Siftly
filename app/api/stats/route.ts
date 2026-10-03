@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { toBookmarkWithMedia } from '@/lib/bookmark-dto'
+import { toBookmarkCards } from '@/lib/bookmark-dto'
 
 export async function GET(): Promise<NextResponse> {
   try {
@@ -47,7 +47,7 @@ export async function GET(): Promise<NextResponse> {
       }),
     ])
 
-    const formattedRecent = recentBookmarks.map(toBookmarkWithMedia)
+    const formattedRecent = await toBookmarkCards(recentBookmarks)
 
     const topCategories = topCategoriesRaw.map((cat) => ({
       name: cat.name,
