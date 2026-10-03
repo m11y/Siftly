@@ -10,6 +10,7 @@ type Method = 'bookmarklet' | 'console' | 'live'
 
 interface ImportResult {
   imported: number
+  updated?: number
   skipped: number
   total: number
   parsed: number
@@ -154,7 +155,7 @@ const BOOKMARKLET_SCRIPT = `(async function(){
         window.removeEventListener('message',onMsg);
         if(e.data.error){fallback('\u274c Siftly import failed: '+e.data.error);return;}
         finish();
-        showToast('\u2705 Siftly imported '+e.data.imported+' new '+label+', '+e.data.skipped+' already saved','#14532d');
+        showToast('\u2705 Siftly imported '+e.data.imported+' new '+label+', refreshed '+(e.data.updated||0)+', '+e.data.skipped+' already saved','#14532d');
       }
     }
     window.addEventListener('message',onMsg);
@@ -985,6 +986,7 @@ function ImportingStep({ result }: {
         <p className="text-xl font-bold text-zinc-100">Import Complete</p>
         <p className="text-zinc-400 mt-1">
           <span className="text-emerald-400 font-semibold">{result.imported}</span> imported,{' '}
+          {!!result.updated && <>{result.updated} refreshed,{' '}</>}
           <span className="text-zinc-500">{result.skipped} skipped</span> as duplicates
         </p>
       </div>
@@ -1410,7 +1412,7 @@ export default function ImportPage() {
             result={importing ? null : importResult}
           />
         )}
-        {step === 3 && <CategorizeStep importedCount={importResult ? importResult.imported : -1} force={forceReprocess} />}
+        {step === 3 && <CategorizeStep importedCount={importResult ? importResult.imported + (importResult.updated ?? 0) : -1} force={forceReprocess} />}
       </div>
     </div>
   )
