@@ -90,6 +90,24 @@ export function isVideoUrl(url: string): boolean {
   return url.includes('video.twimg.com') || url.includes('.mp4')
 }
 
+// ── Author profile link ───────────────────────────────────────────────────────
+
+/** Name / @handle linking to the author's X profile, like on X. */
+export function ProfileLink({ handle, className, children }: { handle: string; className?: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={`https://x.com/${handle}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className={`hover:underline ${className ?? ''}`}
+      title={`@${handle} on X`}
+    >
+      {children}
+    </a>
+  )
+}
+
 // ── Quoted tweet ───────────────────────────────────────────────────────────────
 // Kept visually below the main tweet: cards show one small thumbnail, the
 // reader a compact grid. `full` (the reader) also shows every line of text.

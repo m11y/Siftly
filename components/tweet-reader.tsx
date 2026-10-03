@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
-import { AuthorAvatar, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
+import { AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
  * Full view of one tweet: complete text with its line breaks, every photo and
@@ -56,9 +56,13 @@ export default function TweetReader({
         <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-800">
           <AuthorAvatar name={bookmark.authorName} handle={bookmark.authorHandle} tweetId={bookmark.tweetId} size={10} />
           <div className="min-w-0 flex-1">
-            {isKnownAuthor && <p className="text-sm font-semibold text-zinc-100 truncate">{bookmark.authorName}</p>}
+            {isKnownAuthor && (
+              <p className="text-sm font-semibold text-zinc-100 truncate">
+                <ProfileLink handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
+              </p>
+            )}
             <p className="text-xs text-zinc-500 truncate">
-              {isKnownAuthor && `@${bookmark.authorHandle} · `}
+              {isKnownAuthor && <><ProfileLink handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>{' · '}</>}
               {formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)}
             </p>
           </div>
