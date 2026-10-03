@@ -155,8 +155,9 @@ const BOOKMARKLET_SCRIPT = `(function(){
     }
   });
 
-  // ── Batching: send whatever has been collected, one batch in flight at a time ──
-  var BATCH=50;
+  // ── Batching: a batch goes out as soon as 5 tweets are queued (the rest on the
+  // 3 s tick), one batch in flight at a time; each batch also kicks the AI pipeline ──
+  var BATCH=5;
   function flush(){
     if(inFlight||!queue.length||!relay||relay.closed||!relayReady)return;
     var source=queue[0].source,items=[],rest=[];
@@ -189,6 +190,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     if(hasArticleBody(t)&&!seenArticles.has(t.rest_id)){seenArticles.add(t.rest_id);queue.push({source:'complete',tweet:t});}
     var source=pageSource();if(!source||seen.has(t.rest_id))return;
     seen.add(t.rest_id);queue.push({source:source,tweet:t});collected++;render();
+    if(queue.length>=BATCH)flush();
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
   function unwrapTweet(t){
