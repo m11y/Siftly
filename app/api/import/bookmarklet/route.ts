@@ -37,15 +37,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   let imported = 0
+  let updated = 0
   let skipped = 0
 
   for (const raw of tweets) {
     const bookmark = parseGraphqlTweet(raw)
     if (!bookmark) continue
 
-    if ((await saveBookmark(bookmark, source)) === 'imported') imported++
+    const result = await saveBookmark(bookmark, source)
+    if (result === 'imported') imported++
+    else if (result === 'updated') updated++
     else skipped++
   }
 
-  return NextResponse.json({ imported, skipped }, { headers: cors })
+  return NextResponse.json({ imported, updated, skipped }, { headers: cors })
 }

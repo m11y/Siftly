@@ -14,7 +14,7 @@ type State =
   | { kind: 'no-opener' }
   | { kind: 'waiting' }
   | { kind: 'importing'; count: number }
-  | { kind: 'done'; imported: number; skipped: number; pipeline: 'started' | 'busy' | 'skipped' }
+  | { kind: 'done'; imported: number; updated: number; skipped: number; pipeline: 'started' | 'busy' | 'skipped' }
   | { kind: 'error'; message: string }
 
 export default function ReceivePage() {
@@ -40,16 +40,17 @@ export default function ReceivePage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ source: data.source, tweets: data.tweets }),
         })
-        const result = await res.json() as { imported?: number; skipped?: number; error?: string }
+        const result = await res.json() as { imported?: number; updated?: number; skipped?: number; error?: string }
         if (!res.ok) throw new Error(result.error ?? `Import failed (${res.status})`)
         const imported = result.imported ?? 0
+        const updated = result.updated ?? 0
         const skipped = result.skipped ?? 0
-        opener?.postMessage({ type: 'siftly:result', imported, skipped }, e.origin)
+        opener?.postMessage({ type: 'siftly:result', imported, updated, skipped }, e.origin)
 
         // The import already succeeded and was reported; a pipeline hiccup must not
         // reach the catch below, or the bookmarklet would also download a fallback file.
         let pipeline: 'started' | 'busy' | 'skipped' = 'skipped'
-        if (imported > 0) {
+        if (imported > 0 || updated > 0) {
           try {
             const cat = await fetch('/api/categorize', {
               method: 'POST',
@@ -62,7 +63,7 @@ export default function ReceivePage() {
             pipeline = 'busy'
           }
         }
-        setState({ kind: 'done', imported, skipped, pipeline })
+        setState({ kind: 'done', imported, updated, skipped, pipeline })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         opener?.postMessage({ type: 'siftly:result', error: message }, e.origin)
@@ -98,7 +99,7 @@ export default function ReceivePage() {
       {state.kind === 'done' && (
         <div className="space-y-3 text-sm">
           <p className="flex items-center gap-2 text-emerald-400">
-            <CheckCircle size={16} /> Imported {state.imported} new, skipped {state.skipped} already saved.
+            <CheckCircle size={16} /> Imported {state.imported} new, refreshed {state.updated} older imports, skipped {state.skipped} already saved.
           </p>
           {state.pipeline === 'started' && <p className="text-zinc-400">AI pipeline started.</p>}
           {state.pipeline === 'busy' && (

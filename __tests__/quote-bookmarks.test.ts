@@ -100,3 +100,40 @@ describe('quoted tweets as transitive bookmarks', () => {
     expect(rows.length).toBe(1)
   })
 })
+
+describe('refreshing rows saved by the old flattened file export', () => {
+  it('replaces the tweet data, keeps AI results on unchanged photos, clears entities', async () => {
+    const legacy = {
+      id_str: '400', full_text: 'old text https://t.co/x https://t.co/m',
+      entities: { urls: [{ expanded_url: 'https://example.com/' }] },
+    }
+    const row = await m.prisma.bookmark.create({ data: {
+      tweetId: '400', text: legacy.full_text, authorHandle: 'unknown', authorName: 'Unknown',
+      rawJson: JSON.stringify(legacy), source: 'bookmark', entities: '{"v":2,"links":[]}', semanticTags: '["kept"]',
+      mediaItems: { create: [
+        { type: 'photo', url: 'https://pbs.twimg.com/media/Keep.jpg', imageTags: '{"tags":["kept"]}' },
+        { type: 'video', url: 'https://video.twimg.com/old.mp4', thumbnailUrl: 'https://video.twimg.com/old.mp4' },
+      ] },
+    } })
+    const fresh = m.parser.parseGraphqlTweet({
+      __typename: 'Tweet', rest_id: '400', ...user('carol'),
+      legacy: {
+        full_text: 'old text https://t.co/x https://t.co/m',
+        entities: { urls: [{ url: 'https://t.co/x', expanded_url: 'https://example.com/', display_url: 'example.com' } as never] },
+        extended_entities: { media: [
+          { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/Keep.jpg' },
+          { type: 'video', media_url_https: 'https://pbs.twimg.com/poster.jpg', video_info: { variants: [{ content_type: 'video/mp4', bitrate: 1, url: 'https://video.twimg.com/new.mp4' }] } },
+        ] },
+      },
+    })!
+    expect(await m.store.saveBookmark(fresh, 'bookmark')).toBe('updated')
+    expect(await m.store.saveBookmark(fresh, 'bookmark')).toBe('skipped') // now GraphQL: no second refresh
+
+    const after = await m.prisma.bookmark.findUnique({ where: { id: row.id }, include: { mediaItems: { orderBy: { url: 'asc' } } } })
+    expect(after).toMatchObject({ authorHandle: 'carol', entities: null, semanticTags: '["kept"]', source: 'bookmark' })
+    expect(after!.mediaItems.map((x) => [x.url, x.thumbnailUrl, x.imageTags])).toEqual([
+      ['https://pbs.twimg.com/media/Keep.jpg', 'https://pbs.twimg.com/media/Keep.jpg', '{"tags":["kept"]}'],
+      ['https://video.twimg.com/new.mp4', 'https://pbs.twimg.com/poster.jpg', null],
+    ])
+  })
+})

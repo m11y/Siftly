@@ -73,11 +73,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   })
 
   let importedCount = 0
+  let updatedCount = 0
   let skippedCount = 0
 
   for (const bookmark of parsedBookmarks) {
     try {
-      if ((await saveBookmark(bookmark, source)) === 'imported') importedCount++
+      const result = await saveBookmark(bookmark, source)
+      if (result === 'imported') importedCount++
+      else if (result === 'updated') updatedCount++
       else skippedCount++
     } catch (err) {
       console.error(`Failed to import tweet ${bookmark.tweetId}:`, err)
@@ -96,6 +99,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     jobId: importJob.id,
     imported: importedCount,
+    updated: updatedCount,
     skipped: skippedCount,
     parsed: parsedBookmarks.length,
   })
