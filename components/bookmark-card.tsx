@@ -124,7 +124,7 @@ function LinkPreview({ url, tweetUrl, tweetId, prominent = false }: { url: strin
         {data.image && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={data.image}
+            src={previewImageSrc(data.image, tweetId)}
             alt=""
             className="w-full h-40 object-cover border-b border-zinc-800"
             loading="lazy"
@@ -162,7 +162,7 @@ function LinkPreview({ url, tweetUrl, tweetId, prominent = false }: { url: strin
       {data.image && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={data.image}
+          src={previewImageSrc(data.image, tweetId)}
           alt=""
           className="w-24 h-full object-cover shrink-0 border-r border-zinc-800"
           loading="lazy"
@@ -245,16 +245,21 @@ function formatDate(dateStr: string | null): string {
 
 // ── Author Avatar ──────────────────────────────────────────────────────────────
 
-function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: string; avatarUrl?: string | null }) {
-  const [imgFailed, setImgFailed] = useState(false)
+function AuthorAvatar({ name, handle, tweetId }: { name: string; handle: string; tweetId: string }) {
+  const [failures, setFailures] = useState(0)
   const bg = stringToColor(handle)
   const initials = getInitials(name)
 
-  // Prefer stored avatar URL, fall back to unavatar.io for any Twitter handle
+  // The avatar from the tweet JSON (local copy when saved), then unavatar.io for
+  // older imports that lack it, then initials.
   const cleanHandle = handle.replace(/^@/, '')
-  const src = avatarUrl ?? (cleanHandle && cleanHandle !== 'unknown' ? `https://unavatar.io/twitter/${cleanHandle}` : null)
+  const sources = [
+    `/api/media?tweetId=${tweetId}&kind=avatar`,
+    ...(cleanHandle && cleanHandle !== 'unknown' ? [`https://unavatar.io/twitter/${cleanHandle}`] : []),
+  ]
+  const src = sources[failures]
 
-  if (src && !imgFailed) {
+  if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -262,7 +267,7 @@ function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: strin
         alt={name}
         className="flex-shrink-0 w-8 h-8 rounded-full object-cover select-none"
         loading="lazy"
-        onError={() => setImgFailed(true)}
+        onError={() => setFailures((n) => n + 1)}
       />
     )
   }
@@ -280,8 +285,14 @@ function AuthorAvatar({ name, handle, avatarUrl }: { name: string; handle: strin
 
 // ── Top media slot (no margins — rendered full-bleed at top of card) ────────
 
-function proxyUrl(url: string): string {
-  return `/api/media?url=${encodeURIComponent(url)}`
+/** With tweetId, /api/media serves the pipeline's local copy when it exists. */
+function proxyUrl(url: string, tweetId?: string): string {
+  return `/api/media?url=${encodeURIComponent(url)}${tweetId ? `&tweetId=${tweetId}` : ''}`
+}
+
+/** X card images may have a local copy; other sites' og:image load as before. */
+function previewImageSrc(image: string, tweetId?: string): string {
+  return tweetId && image.startsWith('https://pbs.twimg.com/') ? proxyUrl(image, tweetId) : image
 }
 
 /** Returns true if the URL points to an actual video file (not a thumbnail JPEG) */
@@ -289,36 +300,10 @@ function isVideoUrl(url: string): boolean {
   return url.includes('video.twimg.com') || url.includes('.mp4')
 }
 
-/** Derive a thumbnail URL from a Twitter video URL */
-function deriveVideoThumb(url: string): string | null {
-  // amplify_video/{id}/vid/... → pbs.twimg.com/amplify_video_thumb/{id}/img/default.jpg
-  const amplify = url.match(/video\.twimg\.com\/amplify_video\/(\d+)/)
-  if (amplify) return `https://pbs.twimg.com/amplify_video_thumb/${amplify[1]}/img/default.jpg`
-  // ext_tw_video/{id}/pu/vid/... → pbs.twimg.com/ext_tw_video_thumb/{id}/pu/img/default.jpg
-  const ext = url.match(/video\.twimg\.com\/ext_tw_video\/(\d+)/)
-  if (ext) return `https://pbs.twimg.com/ext_tw_video_thumb/${ext[1]}/pu/img/default.jpg`
-  // tweet_video/{id}.mp4 → pbs.twimg.com/tweet_video_thumb/{id}.jpg
-  const tweet = url.match(/video\.twimg\.com\/tweet_video\/([^.]+)\.mp4/)
-  if (tweet) return `https://pbs.twimg.com/tweet_video_thumb/${tweet[1]}.jpg`
-  return null
-}
-
 interface TopMediaSlotProps {
   item: BookmarkWithMedia['mediaItems'][number]
   tweetUrl: string
-}
-
-/** Consistent overlay shown on top of a thumbnail — used for both video and X-link cases */
-function MediaOverlay({ label, icon }: { label?: string; icon?: React.ReactNode }) {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/50 transition-colors">
-      {icon ?? (
-        <span className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-semibold backdrop-blur-sm">
-          {label ?? 'Watch on X ↗'}
-        </span>
-      )}
-    </div>
-  )
+  tweetId: string
 }
 
 /** Placeholder shown when no thumbnail is available — styled as a proper video preview */
@@ -348,8 +333,9 @@ function MediaPlaceholder({ onClick, label, isVideo }: { onClick?: (e: React.Mou
   )
 }
 
-function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
+function TopMediaSlot({ item, tweetUrl, tweetId }: TopMediaSlotProps) {
   const [imgError, setImgError] = useState(false)
+  const [videoError, setVideoError] = useState(false)
 
   // ── Photo: show inline ─────────────────────────────────────────────────────
   if (item.type === 'photo') {
@@ -368,7 +354,7 @@ function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={proxyUrl(item.url)}
+        src={proxyUrl(item.url, tweetId)}
         alt="Bookmark media"
         className="w-full h-48 object-cover"
         loading="lazy"
@@ -377,30 +363,33 @@ function TopMediaSlot({ item, tweetUrl }: TopMediaSlotProps) {
     )
   }
 
-  // ── Video/GIF: always redirect to tweet — can't play locally ──────────────
-  // Guard: thumbnailUrl that is itself a video URL is not usable as an <img>
-  const rawThumb = item.thumbnailUrl ?? null
-  const thumb = rawThumb && !isVideoUrl(rawThumb) ? rawThumb
-    : (!isVideoUrl(item.url) ? item.url : deriveVideoThumb(item.url))
+  // ── Video/GIF: play the local copy inline (saved by the pipeline's media stage) ──
+  // Posters exist only for imports that carried one; otherwise `#t=0.1` makes the
+  // browser render an early frame as the preview, with no extra file to keep.
+  const poster = item.thumbnailUrl && !isVideoUrl(item.thumbnailUrl) ? proxyUrl(item.thumbnailUrl, tweetId) : undefined
+  const isGif = item.type === 'gif'
 
+  if (videoError) {
+    return (
+      <a href={tweetUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+        <MediaPlaceholder label="Watch on X ↗" isVideo={!isGif} />
+      </a>
+    )
+  }
   return (
-    <a href={tweetUrl} target="_blank" rel="noopener noreferrer" className="relative block" onClick={(e) => e.stopPropagation()}>
-      {thumb && !imgError ? (
-        <div className="relative">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={proxyUrl(thumb)}
-            alt=""
-            className="w-full h-48 object-cover"
-            loading="lazy"
-            onError={() => setImgError(true)}
-          />
-          <MediaOverlay />
-        </div>
-      ) : (
-        <MediaPlaceholder label="Watch on X ↗" isVideo={item.type === 'video'} />
-      )}
-    </a>
+    <video
+      src={`${proxyUrl(item.url, tweetId)}${poster ? '' : '#t=0.1'}`}
+      poster={poster}
+      className="w-full h-48 object-contain bg-black"
+      preload={isGif ? 'auto' : 'metadata'}
+      controls={!isGif}
+      autoPlay={isGif}
+      loop={isGif}
+      muted={isGif}
+      playsInline
+      onClick={(e) => e.stopPropagation()}
+      onError={() => setVideoError(true)}
+    />
   )
 }
 
@@ -632,7 +621,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   function handleDownload() {
     if (!firstMedia) return
     const a = document.createElement('a')
-    a.href = `/api/media?url=${encodeURIComponent(firstMedia.url)}&download=1`
+    a.href = `${proxyUrl(firstMedia.url, bookmark.tweetId)}&download=1`
     a.download = ''
     document.body.appendChild(a)
     a.click()
@@ -703,7 +692,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
       {/* Top media — full bleed, no padding */}
       {firstMedia && (
         <div className="border-b border-zinc-800/60 rounded-t-2xl overflow-hidden shrink-0">
-          <TopMediaSlot item={firstMedia} tweetUrl={tweetUrl} />
+          <TopMediaSlot item={firstMedia} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} />
         </div>
       )}
 
@@ -714,7 +703,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="flex items-center gap-2.5 min-w-0">
             {isKnownAuthor && (
-              <AuthorAvatar name={bookmark.authorName} handle={bookmark.authorHandle} />
+              <AuthorAvatar name={bookmark.authorName} handle={bookmark.authorHandle} tweetId={bookmark.tweetId} />
             )}
             <div className="min-w-0">
               {isKnownAuthor && (

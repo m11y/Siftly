@@ -17,8 +17,9 @@ import {
 } from '@/lib/vision-analyzer'
 import { backfillEntities } from '@/lib/rawjson-extractor'
 import { rebuildFts } from '@/lib/fts'
+import { downloadMissingMedia } from '@/lib/media-store'
 
-type Stage = 'vision' | 'entities' | 'enrichment' | 'categorize' | 'parallel'
+type Stage = 'vision' | 'entities' | 'media' | 'enrichment' | 'categorize' | 'parallel'
 
 interface CategorizationState {
   status: 'idle' | 'running' | 'stopping'
@@ -28,6 +29,7 @@ interface CategorizationState {
   stageCounts: {
     visionTagged: number
     entitiesExtracted: number
+    mediaDownloaded: number
     enriched: number
     categorized: number
   }
@@ -47,7 +49,7 @@ if (!globalState.categorizationState) {
     stage: null,
     done: 0,
     total: 0,
-    stageCounts: { visionTagged: 0, entitiesExtracted: 0, enriched: 0, categorized: 0 },
+    stageCounts: { visionTagged: 0, entitiesExtracted: 0, mediaDownloaded: 0, enriched: 0, categorized: 0 },
     lastError: null,
     error: null,
   }
@@ -139,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     stage: 'entities',
     done: 0,
     total,
-    stageCounts: { visionTagged: 0, entitiesExtracted: 0, enriched: 0, categorized: 0 },
+    stageCounts: { visionTagged: 0, entitiesExtracted: 0, mediaDownloaded: 0, enriched: 0, categorized: 0 },
     lastError: null,
     error: null,
   })
@@ -150,7 +152,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     (await prisma.setting.findUnique({ where: { key: keyName } }))?.value?.trim() || ''
 
   void (async () => {
-    const counts = { visionTagged: 0, entitiesExtracted: 0, enriched: 0, categorized: 0 }
+    const counts = { visionTagged: 0, entitiesExtracted: 0, mediaDownloaded: 0, enriched: 0, categorized: 0 }
 
     try {
       let client: AIClient | null = null
@@ -181,7 +183,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           setState({ stageCounts: { ...counts } })
         }
 
-        // Stage 2: Parallel pipeline — vision + enrichment + categorize per bookmark
+        // Stage 2: Keep local copies of all media (no API calls). Runs over every
+        // bookmark, not just unprocessed ones, so earlier failures are retried.
+        if (!shouldAbort()) {
+          setState({ stage: 'media' })
+          await downloadMissingMedia((n) => {
+            counts.mediaDownloaded = n
+            setState({ stageCounts: { ...counts } })
+          }, shouldAbort).catch((err) => {
+            console.error('Media download error:', err)
+          })
+        }
+
+        // Stage 3: Parallel pipeline — vision + enrichment + categorize per bookmark
         if (!shouldAbort()) {
           // Fetch all bookmark IDs to process
           let bookmarkIdsToProcess: string[]
@@ -275,15 +289,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             let anyVisionRan = false
             for (const media of bm.mediaItems) {
               if (shouldAbort()) return
-              if (media.imageTags !== null) continue
+              if (media.imageTags !== null || media.type !== 'photo') continue
               try {
-                await analyzeItem(
+                const analyzed = await analyzeItem(
                   { id: media.id, url: media.url, thumbnailUrl: media.thumbnailUrl, type: media.type },
                   client,
                   model,
                 )
                 anyVisionRan = true
-                counts.visionTagged++
+                counts.visionTagged += analyzed
                 setState({ stageCounts: { ...counts } })
               } catch (err) {
                 console.warn('[parallel] vision failed for', media.id, err instanceof Error ? err.message : err)

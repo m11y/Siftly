@@ -57,7 +57,7 @@ function extractLegend(nodes: Node[]): CategoryLegendItem[] {
     })
 }
 
-type CategorizeStage = 'vision' | 'entities' | 'enrichment' | 'categorize' | 'parallel' | null
+type CategorizeStage = 'vision' | 'entities' | 'media' | 'enrichment' | 'categorize' | 'parallel' | null
 
 interface CategorizeStatus {
   status: 'idle' | 'running' | 'stopping'
@@ -69,6 +69,7 @@ interface CategorizeStatus {
 const STAGE_LABELS: Record<NonNullable<CategorizeStage>, string> = {
   entities: 'Extracting entities…',
   vision: 'Analyzing images…',
+  media: 'Saving media locally…',
   enrichment: 'Generating semantic tags…',
   categorize: 'Categorizing bookmarks…',
   parallel: 'Processing bookmarks in parallel…',

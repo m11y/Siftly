@@ -4,6 +4,9 @@ import { getCliAvailability, claudePrompt, modelNameToCliAlias } from '@/lib/cla
 import { getCodexCliAvailability, codexPrompt } from '@/lib/codex-cli'
 import { getActiveModel, getProvider } from '@/lib/settings'
 import { AIClient } from '@/lib/ai-client'
+import { localPathFor } from '@/lib/media-store'
+import { readFile } from 'fs/promises'
+import path from 'path'
 
 export { getActiveModel } from '@/lib/settings'
 
@@ -19,29 +22,26 @@ function guessMediaType(url: string, contentTypeHeader: string | null): AllowedM
 
 const MAX_IMAGE_BYTES = 3_500_000 // 3.5MB raw → ~4.7MB base64, under Claude's 5MB limit
 
-async function fetchImageAsBase64(
-  url: string,
-): Promise<{ data: string; mediaType: AllowedMediaType } | null> {
+type LocalImage = { data: string; mediaType: AllowedMediaType }
+
+/**
+ * Read the pipeline's local copy of an image (see lib/media-store.ts), so vision
+ * never re-downloads from X. 'missing' = not downloaded yet: leave the item
+ * unanalyzed so the next run retries after the download stage fetched it.
+ */
+async function readLocalImage(filePath: string): Promise<LocalImage | 'missing' | 'unusable'> {
+  let buffer: Buffer
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        Referer: 'https://twitter.com/',
-      },
-      signal: AbortSignal.timeout(4000),
-    })
-    if (!res.ok) return null
-    const buffer = await res.arrayBuffer()
-    if (buffer.byteLength < 500) return null // skip tiny/broken responses
-    if (buffer.byteLength > MAX_IMAGE_BYTES) {
-      console.warn(`[vision] skipping oversized image (${Math.round(buffer.byteLength / 1024)}KB): ${url.slice(0, 80)}`)
-      return null
-    }
-    const mediaType = guessMediaType(url, res.headers.get('content-type'))
-    return { data: Buffer.from(buffer).toString('base64'), mediaType }
+    buffer = await readFile(filePath)
   } catch {
-    return null
+    return 'missing'
   }
+  if (buffer.byteLength < 500) return 'unusable' // tiny/broken file
+  if (buffer.byteLength > MAX_IMAGE_BYTES) {
+    console.warn(`[vision] skipping oversized image (${Math.round(buffer.byteLength / 1024)}KB): ${path.basename(filePath)}`)
+    return 'unusable'
+  }
+  return { data: buffer.toString('base64'), mediaType: guessMediaType(filePath, null) }
 }
 
 const ANALYSIS_PROMPT = `Analyze this image for a bookmark search system. Return ONLY valid JSON, no markdown, no explanation.
@@ -102,18 +102,11 @@ async function analyzeImageViaCli(imageUrl: string): Promise<string> {
 
 async function analyzeImageWithRetry(
   url: string,
-  client: AIClient | null,
+  img: LocalImage,
+  client: AIClient,
   model: string,
   attempt = 0,
 ): Promise<string> {
-  // If no SDK client, use CLI path with image URL
-  if (!client) {
-    return attempt === 0 ? analyzeImageViaCli(url) : ''
-  }
-
-  const img = await fetchImageAsBase64(url)
-  if (!img) return ''
-
   try {
     const response = await client.createMessage({
       model,
@@ -160,7 +153,7 @@ async function analyzeImageWithRetry(
 
     if (isRetryable && attempt < RETRY_DELAYS_MS.length) {
       await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
-      return analyzeImageWithRetry(url, client, model, attempt + 1)
+      return analyzeImageWithRetry(url, img, client, model, attempt + 1)
     }
     return ''
   }
@@ -185,12 +178,17 @@ async function getCachedAnalysis(imageUrl: string, excludeId: string): Promise<s
   return existing?.imageTags ?? null
 }
 
+/**
+ * Analyze one photo. Videos and GIFs are skipped: a single frame says little
+ * about a clip, and their posters are kept only for display.
+ */
 export async function analyzeItem(
   item: MediaItemForAnalysis,
   client: AIClient | null,
   model: string,
 ): Promise<number> {
-  const imageUrl = item.type === 'video' ? (item.thumbnailUrl ?? item.url) : item.url
+  if (item.type !== 'photo') return 0
+  const imageUrl = item.url
 
   // Check URL-level dedup cache first
   const cached = await getCachedAnalysis(imageUrl, item.id)
@@ -199,12 +197,23 @@ export async function analyzeItem(
     return 1
   }
 
-  const prefix = item.type === 'video' ? '{"_type":"video_thumbnail",' : ''
-  let tags = await analyzeImageWithRetry(imageUrl, client, model)
-
-  if (tags && prefix) {
-    // Inject a _type marker into the JSON for video thumbnails
-    tags = tags.replace(/^\{/, prefix)
+  let tags = ''
+  if (!client) {
+    // CLI path passes the URL in the prompt; there is no image payload to read.
+    tags = await analyzeImageViaCli(imageUrl)
+  } else {
+    const row = await prisma.mediaItem.findUnique({
+      where: { id: item.id },
+      select: { bookmark: { select: { tweetId: true } } },
+    })
+    const filePath = row ? localPathFor(row.bookmark.tweetId, imageUrl) : null
+    const img = filePath ? await readLocalImage(filePath) : 'missing'
+    if (img === 'missing') {
+      console.warn(`[vision] local file missing, will retry next run: media=${item.id}`)
+      return 0
+    }
+    if (img !== 'unusable') tags = await analyzeImageWithRetry(imageUrl, img, client, model)
+    if (!tags) console.warn(`[vision] no usable analysis: media=${item.id}`)
   }
 
   if (tags) {
@@ -218,24 +227,8 @@ export async function analyzeItem(
   return 0
 }
 
-export async function runWithConcurrency<T>(
-  tasks: (() => Promise<T>)[],
-  limit: number,
-): Promise<T[]> {
-  const results: T[] = []
-  let index = 0
-
-  async function worker() {
-    while (index < tasks.length) {
-      const taskIndex = index++
-      results[taskIndex] = await tasks[taskIndex]()
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker())
-  await Promise.all(workers)
-  return results
-}
+import { runWithConcurrency } from '@/lib/concurrency'
+export { runWithConcurrency }
 
 export async function analyzeBatch(
   items: MediaItemForAnalysis[],
@@ -243,7 +236,7 @@ export async function analyzeBatch(
   onProgress?: (delta: number) => void,
   shouldAbort?: () => boolean,
 ): Promise<number> {
-  const analyzable = items.filter((m) => m.type === 'photo' || m.type === 'gif' || m.type === 'video')
+  const analyzable = items.filter((m) => m.type === 'photo')
   if (analyzable.length === 0) return 0
 
   const model = await getActiveModel()
@@ -261,7 +254,7 @@ export async function analyzeBatch(
 
 export async function analyzeUntaggedImages(client: AIClient, limit = 10): Promise<number> {
   const untagged = await prisma.mediaItem.findMany({
-    where: { imageTags: null, type: { in: ['photo', 'gif', 'video'] } },
+    where: { imageTags: null, type: 'photo' },
     take: limit,
     select: { id: true, url: true, thumbnailUrl: true, type: true },
   })
@@ -288,7 +281,7 @@ export async function analyzeAllUntagged(
     // and we never re-fetch items we already attempted this run.
     const untagged = await prisma.mediaItem.findMany({
       where: {
-        type: { in: ['photo', 'gif', 'video'] },
+        type: 'photo',
         // Only fetch items that have never been attempted (null) — '{}' sentinel means already tried
         imageTags: null,
         ...(cursor ? { id: { gt: cursor } } : {}),

@@ -149,7 +149,9 @@ async function getCategoryTweetNodes(categorySlug: string): Promise<MindMapRespo
         : bookmark.text
 
     const firstMedia = bookmark.mediaItems[0] ?? null
-    const thumbnailUrl = firstMedia?.thumbnailUrl ?? (firstMedia?.type === 'photo' ? firstMedia.url : null) ?? null
+    // Old file imports stored the mp4 itself as a video's thumbnail; an <img> can't show it.
+    const rawThumb = firstMedia?.thumbnailUrl ?? (firstMedia?.type === 'photo' ? firstMedia.url : null) ?? null
+    const thumbnailUrl = rawThumb && !/video\.twimg\.com|\.mp4(\?|$)/.test(rawThumb) ? rawThumb : null
 
     // Extract a brief visual summary from structured imageTags for tooltip
     let visualSummary: string | null = null
