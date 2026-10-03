@@ -51,3 +51,16 @@ describe('entities links and quoted tweet', () => {
     expect(tweetSegments('photo https://t.co/abc', [])).toEqual([{ text: 'photo' }])
   })
 })
+
+describe('mentions', () => {
+  it('links @handles to profiles but leaves e-mail addresses alone', () => {
+    const segs = tweetSegments('@Isalmwp 一个破工作，cc @bob_1. mail a@b.com', [])
+    expect(segs).toEqual([
+      { mention: 'Isalmwp' },
+      { text: ' 一个破工作，cc ' },
+      { mention: 'bob_1' },
+      { text: '. mail a@b.com' },
+    ])
+    expect(tweetTextLength(segs)).toBe('@Isalmwp 一个破工作，cc @bob_1. mail a@b.com'.length)
+  })
+})
