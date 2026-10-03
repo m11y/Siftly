@@ -164,16 +164,73 @@ async function downloadTo(url: string, dest: string, timeoutMs: number): Promise
   }
 }
 
-/** Ensure one target exists locally. Returns 'kept' | 'downloaded' | 'failed'. */
-async function ensureTarget(tweetId: string, t: MediaTarget): Promise<'kept' | 'downloaded' | 'failed'> {
+// ── MediaDownloader: the single place that writes media to disk ───────────────
+// Two callers drive it: the pipeline's media stage and /api/media when a page
+// asks for a file that is not on disk yet. Both go through ensureMedia(), which
+// shares one concurrency limit and one in-flight download per file.
+
+type EnsureResult = 'kept' | 'downloaded' | 'failed'
+
+let activeDownloads = 0
+const waiting: (() => void)[] = []
+const inFlight = new Map<string, Promise<EnsureResult>>()
+
+/** Page requests jump the queue: the user is waiting on them, the pipeline is not. */
+async function acquireSlot(urgent: boolean): Promise<void> {
+  if (activeDownloads < DOWNLOAD_CONCURRENCY) {
+    activeDownloads++
+    return
+  }
+  await new Promise<void>((resolve) => (urgent ? waiting.unshift(resolve) : waiting.push(resolve)))
+}
+
+/** Hand the slot straight to the next waiter so the limit is never exceeded. */
+function releaseSlot(): void {
+  const next = waiting.shift()
+  if (next) next()
+  else activeDownloads--
+}
+
+async function download(tweetId: string, t: MediaTarget, dest: string, urgent: boolean): Promise<EnsureResult> {
+  await acquireSlot(urgent)
+  try {
+    if (await fileExists(dest)) return 'kept'
+    await mkdir(path.dirname(dest), { recursive: true })
+    for (const url of t.candidates) {
+      if (await downloadTo(url, dest, t.timeoutMs)) return 'downloaded'
+    }
+    console.warn(`[media] download failed tweet=${tweetId} file=${t.name} candidates=${t.candidates.length}`)
+    return 'failed'
+  } finally {
+    releaseSlot()
+  }
+}
+
+/** Make sure one target is on disk; concurrent callers for the same file share one download. */
+export async function ensureMedia(tweetId: string, t: MediaTarget, opts: { urgent?: boolean } = {}): Promise<EnsureResult> {
   const dest = path.join(MEDIA_DIR, tweetId, t.name)
   if (await fileExists(dest)) return 'kept'
-  await mkdir(path.dirname(dest), { recursive: true })
-  for (const url of t.candidates) {
-    if (await downloadTo(url, dest, t.timeoutMs)) return 'downloaded'
+  let job = inFlight.get(dest)
+  if (!job) {
+    job = download(tweetId, t, dest, opts.urgent ?? false).finally(() => inFlight.delete(dest))
+    inFlight.set(dest, job)
   }
-  console.warn(`[media] download failed tweet=${tweetId} file=${t.name} candidates=${t.candidates.length}`)
-  return 'failed'
+  return job
+}
+
+/**
+ * The target a page request for `url` maps to, from the bookmark's own target
+ * list, so a page asking for a small size still saves the largest one. Null
+ * when the URL is not one of the bookmark's media (nothing to save).
+ */
+export async function targetForUrl(tweetId: string, url: string): Promise<MediaTarget | null> {
+  const name = localName(url)
+  if (!name || !/^\d+$/.test(tweetId)) return null
+  const b = await prisma.bookmark.findUnique({
+    where: { tweetId },
+    select: { rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
+  })
+  return b ? collectTargets(b).find((t) => t.name === name) ?? null : null
 }
 
 /**
@@ -208,7 +265,7 @@ export async function downloadMissingMedia(
       .filter((b) => /^\d+$/.test(b.tweetId))
       .flatMap((b) => collectTargets(b).map((t) => async () => {
         if (shouldAbort?.()) return
-        const result = await ensureTarget(b.tweetId, t)
+        const result = await ensureMedia(b.tweetId, t)
         if (result === 'downloaded') { downloaded++; onProgress?.(downloaded) }
         if (result === 'failed') failed++
       }))

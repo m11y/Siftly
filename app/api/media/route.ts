@@ -4,7 +4,7 @@ import { stat } from 'fs/promises'
 import path from 'path'
 import { Readable } from 'stream'
 import prisma from '@/lib/db'
-import { avatarUrlFromRaw, fileExists, largeAvatarUrl, localPathFor } from '@/lib/media-store'
+import { avatarUrlFromRaw, ensureMedia, fileExists, largeAvatarUrl, localPathFor, targetForUrl } from '@/lib/media-store'
 
 const ALLOWED_HOSTS = new Set([
   'pbs.twimg.com',
@@ -101,11 +101,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Range header: forwarded upstream, or applied to the local file, so video seeking works
   const rangeHeader = request.headers.get('range')
 
-  // Local copy first (saved by the pipeline's media stage, see lib/media-store.ts)
+  // A bookmark's own media is always served from disk. When the file is missing,
+  // download it now and only then respond: single-user local setup, so a page
+  // showing an image guarantees it is saved (see MediaDownloader in lib/media-store.ts).
   const localPath = tweetId ? localPathFor(tweetId, mediaUrl) : null
-  if (localPath && await fileExists(localPath)) {
-    return serveLocalFile(localPath, rangeHeader, isDownload)
+  if (localPath && tweetId) {
+    if (await fileExists(localPath)) return serveLocalFile(localPath, rangeHeader, isDownload)
+    const target = await targetForUrl(tweetId, mediaUrl)
+    if (target) {
+      const result = await ensureMedia(tweetId, target, { urgent: true })
+      return result === 'failed'
+        ? NextResponse.json({ error: 'Media download failed' }, { status: 502 })
+        : serveLocalFile(localPath, rangeHeader, isDownload)
+    }
   }
+
+  // Not one of the bookmark's media (or no tweetId): plain proxy, nothing saved.
 
   try {
 
