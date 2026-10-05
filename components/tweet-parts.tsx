@@ -2,8 +2,8 @@
 
 // Pieces shared by <BookmarkCard> and <TweetReader>.
 
-import React, { useState } from 'react'
-import { Play } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Play, Trash2 } from 'lucide-react'
 import type { MediaItem, QuotedTweetView } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
 
@@ -105,6 +105,54 @@ export function ProfileLink({ handle, className, children }: { handle: string; c
     >
       {children}
     </a>
+  )
+}
+
+/**
+ * Two-step delete: the first click arms the button, a second click within 3 s
+ * runs onDelete. On success the owner unmounts this; a failure is reported and
+ * the button disarms so the delete can be retried.
+ */
+export function DeleteButton({ onDelete, size = 13 }: { onDelete: () => Promise<void>; size?: number }) {
+  const [armed, setArmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 3000)
+    return () => clearTimeout(t)
+  }, [armed])
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (busy) return
+    if (!armed) { setArmed(true); return }
+    setBusy(true)
+    try {
+      await onDelete()
+    } catch (err) {
+      alert(`删除失败：${err instanceof Error ? err.message : String(err)}`)
+      setArmed(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={busy}
+      className={`inline-flex items-center gap-1 p-1.5 rounded-lg transition-colors ${
+        armed
+          ? 'text-red-300 bg-red-500/20 hover:bg-red-500/30'
+          : 'text-zinc-600 hover:text-red-400 hover:bg-zinc-800'
+      }`}
+      title={armed ? '再点一次删除' : '删除'}
+    >
+      <Trash2 size={size} />
+      {armed && <span className="text-xs leading-none">{busy ? '删除中…' : '确认删除'}</span>}
+    </button>
   )
 }
 

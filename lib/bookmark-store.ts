@@ -4,7 +4,11 @@
  * it goes through the same pipeline (media, vision, tags, categories), counts and
  * filters like any other row, and only its source label differs.
  */
+import { rm } from 'fs/promises'
+import path from 'path'
 import prisma from '@/lib/db'
+import { ensureFtsTable } from '@/lib/fts'
+import { MEDIA_DIR } from '@/lib/media-store'
 import { hasArticleBody, parseGraphqlTweet, type GraphqlTweet, type ParsedBookmark } from '@/lib/parser'
 
 export type BookmarkSource = 'bookmark' | 'like' | 'quote'
@@ -155,4 +159,33 @@ export async function linkQuotedTweets(shouldAbort?: () => boolean): Promise<num
     linked++
   }
   return linked
+}
+
+/**
+ * Delete one bookmark: its media and category rows, its search-index row and its
+ * local media folder. Only this row goes; tweets it quotes or that quote it are
+ * left as they are (a card quoting it falls back to its own snapshot).
+ *
+ * The folder is removed inside the DB transaction, so a failed removal rolls the
+ * rows back and the delete can simply be retried. A removal that failed halfway
+ * leaves the row with some files missing, which ensureMedia downloads again on
+ * the next view. A download still in flight for this tweet may recreate the
+ * folder after the delete; that only leaves an orphan folder, so it is accepted.
+ * Returns false when the bookmark no longer exists.
+ */
+export async function deleteBookmark(id: string): Promise<boolean> {
+  await ensureFtsTable()
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.bookmark.findUnique({ where: { id }, select: { tweetId: true } })
+    if (!row) return false
+    await tx.bookmarkCategory.deleteMany({ where: { bookmarkId: id } })
+    await tx.mediaItem.deleteMany({ where: { bookmarkId: id } })
+    await tx.bookmark.delete({ where: { id } })
+    await tx.$executeRaw`DELETE FROM bookmark_fts WHERE bookmark_id = ${id}`
+    // Tweet ids are digits; anything else must never reach a recursive rm.
+    if (/^[0-9]+$/.test(row.tweetId)) {
+      await rm(path.join(MEDIA_DIR, row.tweetId), { recursive: true, force: true })
+    }
+    return true
+  })
 }

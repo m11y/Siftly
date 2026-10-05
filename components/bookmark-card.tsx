@@ -5,7 +5,7 @@ import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, Ima
 import type { BookmarkWithMedia, Category } from '@/lib/types'
 import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
 import TweetReader from '@/components/tweet-reader'
-import { ArticlePreviewNote, AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
+import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
@@ -490,6 +490,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [editingCategories, setEditingCategories] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
+  const [deleted, setDeleted] = useState(false)
 
   // Like X: a click anywhere on the card opens the full tweet, except on
   // controls that do something themselves, or when the user is selecting text.
@@ -612,6 +613,19 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const isDownloadable = firstMedia !== null &&
     (firstMedia.type === 'photo' || isVideoUrl(firstMedia.url))
 
+  // The card hides itself once deleted (this also closes its reader); lists
+  // don't refetch, so their totals stay as they were until the next load.
+  async function handleDelete() {
+    const res = await fetch(`/api/bookmarks/${bookmark.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string } | null
+      throw new Error(body?.error ?? `HTTP ${res.status}`)
+    }
+    setDeleted(true)
+  }
+
+  if (deleted) return null
+
   return (
     <div
       className="group relative bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-zinc-700 hover:shadow-xl hover:shadow-black/30 transition-all duration-200 flex flex-col flex-1 cursor-pointer"
@@ -684,6 +698,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             >
               <ExternalLink size={13} />
             </a>
+            <DeleteButton onDelete={handleDelete} />
           </div>
           {/* Full tweet — always visible and colored, unlike the hover actions */}
           <button
@@ -779,7 +794,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
 
       </div>
       {readerOpen && (
-        <TweetReader bookmark={bookmark} categories={categories} onClose={() => setReaderOpen(false)} />
+        <TweetReader bookmark={bookmark} categories={categories} onClose={() => setReaderOpen(false)} onDelete={handleDelete} />
       )}
     </div>
   )

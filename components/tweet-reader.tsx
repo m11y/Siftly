@@ -6,7 +6,7 @@ import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
 import MediaLightbox, { type LightboxState } from '@/components/media-lightbox'
-import { ArticlePreviewNote, AuthorAvatar, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
+import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
  * Full view of one tweet: complete text with its line breaks, every photo and
@@ -17,10 +17,13 @@ export default function TweetReader({
   bookmark,
   categories = bookmark.categories,
   onClose,
+  onDelete,
 }: {
   bookmark: BookmarkWithMedia
   categories?: BookmarkCategory[]
   onClose: () => void
+  /** Shown as a delete button when given; the owner unmounts the reader on success. */
+  onDelete?: () => Promise<void>
 }) {
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
   // Esc while the lightbox is open closes only the lightbox, not this dialog.
@@ -82,6 +85,7 @@ export default function TweetReader({
           >
             <ExternalLink size={16} />
           </a>
+          {onDelete && <DeleteButton onDelete={onDelete} size={16} />}
           <button
             onClick={onClose}
             className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
