@@ -64,6 +64,8 @@ export async function saveBookmark(b: ParsedBookmark, source: BookmarkSource): P
       rawJson: b.rawJson,
       source,
       quotedTweetId: b.quotedTweetId ?? null,
+      platform: b.platform ?? 'x',
+      entities: b.entities ?? null,
     },
   })
   if (b.media.length > 0) {

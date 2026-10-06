@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
-import { TweetText, tweetSegments } from '@/components/tweet-text'
+import { TweetText, postSegments } from '@/components/tweet-text'
 import { postUrl } from '@/lib/platform'
 import MediaLightbox, { type LightboxState } from '@/components/media-lightbox'
-import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
+import { ArticlePreviewNote, AuthorAvatar, DeleteButton, WeiboSubline, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
 /**
  * Full view of one tweet: complete text with its line breaks, every photo and
@@ -80,8 +80,8 @@ export default function TweetReader({
   }, [onClose])
 
   const isKnownAuthor = bookmark.authorHandle !== 'unknown'
-  const tweetUrl = postUrl(bookmark)
-  const segments = tweetSegments(bookmark.text, bookmark.links)
+  const tweetUrl = postUrl({ ...bookmark, mblogid: bookmark.weibo?.mblogid })
+  const segments = postSegments(bookmark.platform, bookmark.text, bookmark.links)
   const media = bookmark.mediaItems
   const photoSrcs = media.filter((m) => m.type === 'photo').map((m) => proxyUrl(m.url, bookmark.tweetId))
 
@@ -108,8 +108,14 @@ export default function TweetReader({
               </p>
             )}
             <p className="text-xs text-zinc-500 truncate">
-              {isKnownAuthor && <><ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>{' · '}</>}
-              {formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)}
+              {bookmark.platform === 'weibo' ? (
+                <WeiboSubline date={formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)} source={bookmark.weibo?.source} href={tweetUrl} />
+              ) : (
+                <>
+                  {isKnownAuthor && <><ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>{' · '}</>}
+                  {formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)}
+                </>
+              )}
             </p>
           </div>
           <a

@@ -3,10 +3,10 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, ImageOff, Bookmark, Globe } from 'lucide-react'
 import type { BookmarkWithMedia, Category } from '@/lib/types'
-import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
+import { TweetText, postSegments, tweetTextLength } from '@/components/tweet-text'
 import TweetReader from '@/components/tweet-reader'
 import { postUrl } from '@/lib/platform'
-import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
+import { ArticlePreviewNote, AuthorAvatar, DeleteButton, WeiboSubline, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
 
@@ -503,15 +503,16 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
     setReaderOpen(true)
   }
 
-  const tweetUrl = postUrl(bookmark)
+  const tweetUrl = postUrl({ ...bookmark, mblogid: bookmark.weibo?.mblogid })
   const firstMedia = bookmark.mediaItems[0] ?? null
   const hasMedia = bookmark.mediaItems.length > 0
   const dateStr = formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)
   const isKnownAuthor = bookmark.authorHandle !== 'unknown'
+  const isWeibo = bookmark.platform === 'weibo'
 
   const tcoUrls = bookmark.text.match(TCO_REGEX) ?? []
   // Expanded t.co links render inline like on X; the media t.co is dropped
-  const segments = tweetSegments(bookmark.text, bookmark.links)
+  const segments = postSegments(bookmark.platform, bookmark.text, bookmark.links)
   const textLength = tweetTextLength(segments)
   // Show link preview only when there's no real media attached
   const previewUrl = !hasMedia && tcoUrls.length > 0 ? tcoUrls[tcoUrls.length - 1] : null
@@ -655,9 +656,11 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
                 </p>
               )}
               <p className="text-xs text-zinc-500 truncate">
-                {isKnownAuthor
-                  ? <ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>
-                  : dateStr}
+                {isWeibo
+                  ? <WeiboSubline date={dateStr} source={bookmark.weibo?.source} href={tweetUrl} />
+                  : isKnownAuthor
+                    ? <ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>
+                    : dateStr}
                 {bookmark.source === 'quote' && (
                   <span
                     className="ml-1.5 px-1.5 py-px rounded bg-zinc-800 text-[10px] text-zinc-400"
@@ -769,7 +772,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             {categories.length === 0 && (
               <span className="text-xs text-zinc-700 italic">Uncategorized</span>
             )}
-            {isKnownAuthor && dateStr && (
+            {isKnownAuthor && !isWeibo && dateStr && (
               <span className="ml-auto text-xs text-zinc-600 flex-shrink-0">
                 {dateStr}
               </span>

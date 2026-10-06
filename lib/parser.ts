@@ -1,3 +1,4 @@
+import type { Platform } from '@/lib/platform'
 export interface ParsedMedia {
   type: 'photo' | 'video' | 'gif'
   url: string
@@ -18,6 +19,10 @@ export interface ParsedBookmark {
   quotedTweetId?: string | null
   /** The quoted tweet itself, when X sent its content; saved as a "quote" row. */
   quoted?: ParsedBookmark | null
+  /** Absent means X. */
+  platform?: Platform
+  /** Precomputed entities JSON; X rows get theirs from the pipeline's entity step instead. */
+  entities?: string
 }
 
 interface TwitterMediaVariant {

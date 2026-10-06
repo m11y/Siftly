@@ -50,6 +50,40 @@ export function tweetSegments(text: string, links: TweetLink[] = []): Segment[] 
     .flatMap((s) => ('text' in s ? splitMentions(s.text) : [s]))
 }
 
+// Weibo text: plain URLs (t.cn and others), #话题# and @nickname. Nicknames are
+// 1–30 of CJK, letters, digits, _ and -, so "//@name:" ends at the colon.
+const WEIBO_TOKEN_REGEX = /(https?:\/\/[A-Za-z0-9./?=&%_~:#+-]+)|#([^#\n]{1,64})#|@([\u4e00-\u9fa5A-Za-z0-9_-]{1,30})/g
+
+/**
+ * Split Weibo text the way Weibo renders it: links (to url_struct's target when
+ * known), #话题# to its Weibo search and @nicknames to the user's page. Emoji
+ * codes like [doge] stay as text.
+ */
+export function weiboSegments(text: string, links: TweetLink[] = []): Segment[] {
+  const byUrl = new Map(links.map((l) => [l.url, l]))
+  const segments: Segment[] = []
+  let last = 0
+  for (const m of text.matchAll(WEIBO_TOKEN_REGEX)) {
+    if (m.index > last) segments.push({ text: text.slice(last, m.index) })
+    if (m[1]) {
+      segments.push({ link: byUrl.get(m[1]) ?? { url: m[1], expandedUrl: m[1], displayUrl: m[1].replace(/^https?:\/\//, '') } })
+    } else if (m[2]) {
+      const topic = `#${m[2]}#`
+      segments.push({ link: { url: topic, expandedUrl: `https://s.weibo.com/weibo?q=${encodeURIComponent(topic)}`, displayUrl: topic } })
+    } else {
+      segments.push({ mention: m[3] })
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segments.push({ text: text.slice(last) })
+  return segments
+}
+
+/** Segments for a post's text by its platform. */
+export function postSegments(platform: string | undefined, text: string, links: TweetLink[] = []): Segment[] {
+  return platform === 'weibo' ? weiboSegments(text, links) : tweetSegments(text, links)
+}
+
 function segmentLength(s: Segment): number {
   if ('text' in s) return s.text.length
   return 'link' in s ? s.link.displayUrl.length : s.mention.length + 1

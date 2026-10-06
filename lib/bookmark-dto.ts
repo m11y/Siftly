@@ -26,7 +26,7 @@ export interface BookmarkRow {
  * quoted tweet) reaches all of them at once instead of only the ones remembered.
  */
 export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): BookmarkWithMedia {
-  const { links, quoted: snapshot, articlePreview } = displayEntities(b.entities)
+  const { links, quoted: snapshot, articlePreview, weibo } = displayEntities(b.entities)
   return {
     id: b.id,
     tweetId: b.tweetId,
@@ -35,6 +35,7 @@ export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): Book
     authorName: b.authorName,
     ...(b.source !== undefined ? { source: b.source } : {}),
     ...(b.platform !== undefined ? { platform: b.platform } : {}),
+    ...(weibo ? { weibo } : {}),
     tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
     importedAt: b.importedAt.toISOString(),
     links,
@@ -80,12 +81,14 @@ type QuotedRow = {
 }
 
 function quotedView(q: QuotedRow): QuotedTweetView {
+  const { links, weibo } = displayEntities(q.entities)
   return {
     tweetId: q.tweetId,
     authorName: q.authorName,
     authorHandle: q.authorHandle,
     text: q.text,
-    links: displayEntities(q.entities).links,
+    links,
+    mblogid: weibo?.mblogid ?? null,
     media: q.mediaItems,
     quotedTweetId: q.quotedTweetId,
   }

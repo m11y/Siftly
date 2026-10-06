@@ -4,7 +4,7 @@ import { stat } from 'fs/promises'
 import path from 'path'
 import { Readable } from 'stream'
 import prisma from '@/lib/db'
-import { avatarUrlFromRaw, ensureMedia, fileExists, largeAvatarUrl, localPathFor, targetForUrl } from '@/lib/media-store'
+import { avatarUrlFromRaw, ensureMedia, fileExists, isWeiboMediaHost, largeAvatarUrl, localPathFor, targetForUrl } from '@/lib/media-store'
 
 const ALLOWED_HOSTS = new Set([
   'pbs.twimg.com',
@@ -17,7 +17,7 @@ const ALLOWED_HOSTS = new Set([
 function isAllowedUrl(urlStr: string): boolean {
   try {
     const { protocol, hostname } = new URL(urlStr)
-    return protocol === 'https:' && ALLOWED_HOSTS.has(hostname)
+    return protocol === 'https:' && (ALLOWED_HOSTS.has(hostname) || isWeiboMediaHost(hostname))
   } catch {
     return false
   }
@@ -120,11 +120,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
 
+    // Weibo's image CDN refuses requests whose Referer isn't Weibo.
+    const site = isWeiboMediaHost(new URL(mediaUrl).hostname) ? 'https://weibo.com' : 'https://twitter.com'
     const upstream = await fetch(mediaUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Referer': 'https://twitter.com/',
-        'Origin': 'https://twitter.com',
+        'Referer': `${site}/`,
+        'Origin': site,
         'Accept': '*/*',
         ...(rangeHeader ? { 'Range': rangeHeader } : {}),
       },
