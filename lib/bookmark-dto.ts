@@ -11,6 +11,7 @@ export interface BookmarkRow {
   authorName: string
   source?: string
   quotedTweetId?: string | null
+  note?: string | null
   tweetCreatedAt: Date | null
   importedAt: Date
   entities: string | null
@@ -38,6 +39,7 @@ export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): Book
     articlePreview,
     quotedTweetId: b.quotedTweetId ?? null,
     quoted: quotedRow ? quotedView(quotedRow) : snapshot,
+    note: b.note ?? null,
     mediaItems: b.mediaItems.map((m) => ({
       id: m.id,
       type: m.type,

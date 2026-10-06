@@ -25,6 +25,9 @@ model Bookmark {
   // "quote" (a transitive bookmark) when X sent its content; no FK, because the
   // quoted tweet may be unavailable or itself quote one X did not send.
   quotedTweetId   String?
+  // The user's own note, e.g. for a tweet that is only an image or a video.
+  // Matched by the text search; never sent to the AI pipeline.
+  note            String?
   mediaItems    MediaItem[]
   categories    BookmarkCategory[]
 

@@ -56,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   if (q) {
-    where.text = { contains: q }
+    where.OR = [{ text: { contains: q } }, { note: { contains: q } }]
   }
 
   if (uncategorized) {

@@ -18,20 +18,57 @@ export default function TweetReader({
   categories = bookmark.categories,
   onClose,
   onDelete,
+  onNoteChange,
 }: {
   bookmark: BookmarkWithMedia
   categories?: BookmarkCategory[]
   onClose: () => void
   /** Shown as a delete button when given; the owner unmounts the reader on success. */
   onDelete?: () => Promise<void>
+  /** Told the stored note after a save, so the opener can show it. */
+  onNoteChange?: (note: string | null) => void
 }) {
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
+  const [savedNote, setSavedNote] = useState(bookmark.note ?? '')
+  const [draft, setDraft] = useState(savedNote)
+  const [savingNote, setSavingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  const noteDirty = draft.trim() !== savedNote
+
+  async function saveNote() {
+    if (!noteDirty || savingNote) return
+    setSavingNote(true)
+    setNoteError(null)
+    try {
+      const res = await fetch(`/api/bookmarks/${bookmark.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: draft }),
+      })
+      const body = await res.json().catch(() => null) as { note?: string | null; error?: string } | null
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
+      const stored = body?.note ?? null
+      setSavedNote(stored ?? '')
+      setDraft(stored ?? '')
+      onNoteChange?.(stored)
+    } catch (err) {
+      setNoteError(`保存失败：${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSavingNote(false)
+    }
+  }
   // Esc while the lightbox is open closes only the lightbox, not this dialog.
   const lightboxOpen = useRef(false)
   useEffect(() => { lightboxOpen.current = lightbox !== null }, [lightbox])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !lightboxOpen.current) onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || lightboxOpen.current) return
+      // Esc in the note box only leaves it, so an unsaved note isn't lost.
+      if (document.activeElement === noteRef.current) { noteRef.current?.blur(); return }
+      onClose()
+    }
     document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -155,6 +192,34 @@ export default function TweetReader({
               ))}
             </div>
           )}
+
+          <div className="pt-1">
+            <label htmlFor={`note-${bookmark.id}`} className="block mb-1.5 text-xs font-medium text-amber-300/80">备注</label>
+            <textarea
+              id={`note-${bookmark.id}`}
+              ref={noteRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveNote() }
+              }}
+              rows={3}
+              placeholder="写几句，方便以后搜到这条…"
+              className="w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-amber-500/50"
+            />
+            <div className="mt-1.5 flex items-center justify-end gap-2">
+              {noteError && <span className="mr-auto text-xs text-red-400">{noteError}</span>}
+              {noteDirty && !savingNote && <span className="text-xs text-zinc-500">⌘↵ 保存</span>}
+              <button
+                type="button"
+                onClick={() => void saveNote()}
+                disabled={!noteDirty || savingNote}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-colors disabled:opacity-40 disabled:cursor-default"
+              >
+                {savingNote ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
         </div>
         {/* Inside the dialog box: the lightbox portals elsewhere, but React bubbles
             its clicks through here, and this box stops them before the backdrop. */}

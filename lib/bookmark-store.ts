@@ -189,3 +189,14 @@ export async function deleteBookmark(id: string): Promise<boolean> {
     return true
   })
 }
+
+/**
+ * Set the user's note on a bookmark; blank clears it. Only the note changes —
+ * the text search matches it right away and the AI pipeline is not involved.
+ * Returns the stored value, or undefined when the bookmark no longer exists.
+ */
+export async function setNote(id: string, note: string): Promise<string | null | undefined> {
+  const value = note.trim() || null
+  const { count } = await prisma.bookmark.updateMany({ where: { id }, data: { note: value } })
+  return count > 0 ? value : undefined
+}
