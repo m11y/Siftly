@@ -110,6 +110,17 @@ export function weiboMedia(s: WeiboStatus): ParsedMedia[] {
   return media
 }
 
+const fileName = (url: string) => url.split('?')[0].split('/').pop() ?? url
+
+/**
+ * The post's own media. A repost repeats its original's video in page_info;
+ * that copy is dropped so the video shows once, in the original's quote box.
+ */
+function ownMedia(s: WeiboStatus): ParsedMedia[] {
+  const originals = new Set((s.retweeted_status ? weiboMedia(s.retweeted_status) : []).map((m) => fileName(m.url)))
+  return weiboMedia(s).filter((m) => !originals.has(fileName(m.url)))
+}
+
 /** URLs in the text; Weibo's url_struct (when present) says where a t.cn link goes. */
 export function weiboLinks(s: WeiboStatus): TweetLink[] {
   const longUrl = new Map((s.url_struct ?? []).filter((u) => u.short_url && u.long_url).map((u) => [u.short_url!, u.long_url!]))
@@ -135,7 +146,7 @@ function quotedSnapshot(r: WeiboStatus): QuotedTweet {
 
 export function weiboEntities(s: WeiboStatus): ExtractedEntities {
   const text = weiboText(s)
-  const media = weiboMedia(s)
+  const media = ownMedia(s)
   const links = weiboLinks(s)
   const retweet = s.retweeted_status
   return {
@@ -167,7 +178,7 @@ export function parseWeiboStatus(s: WeiboStatus): ParsedBookmark {
     tweetCreatedAt: parseDate(s.created_at),
     hashtags: entities.hashtags,
     urls: entities.urls,
-    media: weiboMedia(s),
+    media: ownMedia(s),
     rawJson: JSON.stringify(s),
     entities: JSON.stringify(entities),
     quotedTweetId: retweet ? weiboId(retweet) : null,

@@ -25,6 +25,16 @@ describe('parseWeiboStatus', () => {
     expect(e.quoted).toMatchObject({ tweetId: '5000000000000002', authorName: '原作者', authorHandle: '222' })
   })
 
+  it("drops a repost's copy of its original's video", () => {
+    const p = parseWeiboStatus({
+      ...repost,
+      retweeted_status: { ...original, page_info: { object_type: 'video', media_info: { mp4_hd_url: 'https://f.video.weibocdn.com/o0/hd.mp4?y=2' } } },
+    })
+    expect(p.media).toEqual([])
+    expect(JSON.parse(p.entities!).hasMedia).toBe(false)
+    expect(p.quoted?.media.map((m) => m.type)).toEqual(['photo', 'photo', 'video'])
+  })
+
   it('takes the client name and region without their markup', () => {
     expect(weiboMeta(original)).toEqual({ mblogid: 'Pabc', source: 'iPhone客户端', region: '北京' })
   })

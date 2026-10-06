@@ -24,7 +24,8 @@ import path from 'path'
 import prisma from '@/lib/db'
 import { deleteBookmark, saveBookmark } from '@/lib/bookmark-store'
 import { fileExists, localPathFor } from '@/lib/media-store'
-import { parseWeiboStatus, type WeiboStatus } from '@/lib/weibo'
+import type { ParsedBookmark } from '@/lib/parser'
+import { parseWeiboStatus, weiboAvatarUrl, type WeiboStatus } from '@/lib/weibo'
 
 interface WeiboRow {
   id: number
@@ -140,12 +141,15 @@ class Importer {
     }
   }
 
-  /** Copy the post's media into MEDIA_DIR/<id>/; existing copies are kept. */
-  async copyMedia(postId: string): Promise<{ copied: number; missing: string[] }> {
+  /** Copy the post's media and avatar into MEDIA_DIR/<id>/; existing copies are kept. */
+  async copyMedia(post: ParsedBookmark): Promise<{ copied: number; missing: string[] }> {
     let copied = 0
     const missing: string[] = []
-    for (const [url, src] of this.files.get(postId) ?? []) {
-      const dest = localPathFor(postId, url)
+    const avatar = weiboAvatarUrl(JSON.parse(post.rawJson))
+    const wanted = new Set([...post.media.map((m) => m.url), ...(avatar ? [avatar] : [])])
+    for (const [url, src] of this.files.get(post.tweetId) ?? []) {
+      if (!wanted.has(url)) continue // e.g. the original's video weibo_backup also saved on a repost
+      const dest = localPathFor(post.tweetId, url)
       if (!dest || (await fileExists(dest))) continue
       if (!(await fileExists(src))) { missing.push(path.relative(this.mediaRoot, src)); continue }
       await mkdir(path.dirname(dest), { recursive: true })
@@ -195,7 +199,7 @@ async function main() {
       const at = importer.favoritedAt(Number(p.tweetId))
       if (at) await prisma.bookmark.update({ where: { tweetId: p.tweetId }, data: { importedAt: at } })
     }
-    const media = await Promise.all(posts.map((p) => importer.copyMedia(p.tweetId)))
+    const media = await Promise.all(posts.map((p) => importer.copyMedia(p)))
     const copied = media.reduce((n, m) => n + m.copied, 0)
     const missing = media.flatMap((m) => m.missing)
     console.log(
