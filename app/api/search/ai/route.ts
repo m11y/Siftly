@@ -221,7 +221,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const selectShape = {
     id: true, tweetId: true, text: true, authorHandle: true, authorName: true,
     tweetCreatedAt: true, importedAt: true, semanticTags: true, entities: true,
-    source: true, quotedTweetId: true,
+    source: true, quotedTweetId: true, note: true,
     mediaItems: { select: { id: true, type: true, url: true, thumbnailUrl: true, imageTags: true } },
     categories: {
       include: { category: { select: { id: true, name: true, slug: true, color: true } } },

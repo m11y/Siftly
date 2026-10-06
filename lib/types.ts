@@ -34,6 +34,8 @@ export interface BookmarkWithMedia {
   /** Tweet this one quotes; set even when its content is unknown (link to X then). */
   quotedTweetId?: string | null
   quoted?: QuotedTweetView | null
+  /** The user's own note on this bookmark. */
+  note?: string | null
 }
 
 /** A quoted tweet as shown inside another card: its own row when saved, else a snapshot. */

@@ -491,6 +491,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
   const [editingCategories, setEditingCategories] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
   const [deleted, setDeleted] = useState(false)
+  const [note, setNote] = useState(bookmark.note ?? null)
 
   // Like X: a click anywhere on the card opens the full tweet, except on
   // controls that do something themselves, or when the user is selecting text.
@@ -740,7 +741,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
               )}
             </p>
           )}
-          {!hasText && !firstMedia && !previewUrl && !bookmark.quoted && (
+          {!hasText && !firstMedia && !previewUrl && !bookmark.quoted && !note && (
             <p className="text-xs text-zinc-700 italic">No text content</p>
           )}
           {bookmark.articlePreview && <ArticlePreviewNote tweetUrl={tweetUrl} />}
@@ -748,6 +749,14 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
           {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
           {previewUrl && (
             <LinkPreview url={previewUrl} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} prominent={!hasText} />
+          )}
+          {note && (
+            <p
+              className="mt-2 px-2.5 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 text-xs text-amber-200/90 leading-relaxed whitespace-pre-wrap break-words line-clamp-3"
+              title="备注"
+            >
+              {note}
+            </p>
           )}
         </div>
 
@@ -794,7 +803,13 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
 
       </div>
       {readerOpen && (
-        <TweetReader bookmark={bookmark} categories={categories} onClose={() => setReaderOpen(false)} onDelete={handleDelete} />
+        <TweetReader
+          bookmark={{ ...bookmark, note }}
+          categories={categories}
+          onClose={() => setReaderOpen(false)}
+          onDelete={handleDelete}
+          onNoteChange={setNote}
+        />
       )}
     </div>
   )
