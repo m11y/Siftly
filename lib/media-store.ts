@@ -233,9 +233,10 @@ export async function targetForUrl(tweetId: string, url: string): Promise<MediaT
   if (!name || !/^\d+$/.test(tweetId)) return null
   const b = await prisma.bookmark.findUnique({
     where: { tweetId },
-    select: { rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
+    select: { platform: true, rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
   })
-  return b ? collectTargets(b).find((t) => t.name === name) ?? null : null
+  // collectTargets knows X's media URLs only.
+  return b?.platform === 'x' ? collectTargets(b).find((t) => t.name === name) ?? null : null
 }
 
 /**
@@ -253,7 +254,8 @@ export async function downloadMissingMedia(
 
   while (!shouldAbort?.()) {
     const rows = await prisma.bookmark.findMany({
-      ...(cursor ? { where: { id: { gt: cursor } } } : {}),
+      // collectTargets knows X's media URLs only.
+      where: { platform: 'x', ...(cursor ? { id: { gt: cursor } } : {}) },
       orderBy: { id: 'asc' },
       take: CHUNK,
       select: {

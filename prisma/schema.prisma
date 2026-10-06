@@ -9,7 +9,11 @@ datasource db {
 
 model Bookmark {
   id            String    @id @default(cuid())
+  // The post's id on its platform. Unique across platforms: X ids are 19
+  // digits (pre-2010 ones at most 11) and Weibo ids 16, so they never meet; a
+  // collision would fail the insert rather than merge two posts.
   tweetId       String    @unique
+  platform      String    @default("x")  // "x" | "weibo" — see lib/platform.ts
   text          String
   authorHandle  String
   authorName    String
@@ -36,6 +40,7 @@ model Bookmark {
   @@index([enrichedAt])
   @@index([source])
   @@index([quotedTweetId])
+  @@index([platform])
 }
 
 model Category {

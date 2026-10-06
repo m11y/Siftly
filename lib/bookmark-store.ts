@@ -145,7 +145,7 @@ async function refreshFromGraphql(
  */
 export async function linkQuotedTweets(shouldAbort?: () => boolean): Promise<number> {
   const rows = await prisma.bookmark.findMany({
-    where: { quotedTweetId: null, rawJson: { contains: '"quoted_status_' } },
+    where: { platform: 'x', quotedTweetId: null, rawJson: { contains: '"quoted_status_' } },
     select: { id: true, rawJson: true },
   })
   let linked = 0

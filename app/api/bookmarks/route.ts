@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { toBookmarkCards } from '@/lib/bookmark-dto'
+import { PLATFORMS } from '@/lib/platform'
 
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 24
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const q = searchParams.get('q')?.trim() ?? ''
   const source = searchParams.get('source')?.trim() ?? ''
+  const platform = searchParams.get('platform')?.trim() ?? ''
   const categorySlug = searchParams.get('category')?.trim() ?? ''
   const mediaType = searchParams.get('mediaType')?.trim() ?? ''
   const tweetId = searchParams.get('tweetId')?.trim() ?? ''
@@ -53,6 +55,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   if (source === 'bookmark' || source === 'like') {
     where.source = source
+  }
+
+  if ((PLATFORMS as readonly string[]).includes(platform)) {
+    where.platform = platform
   }
 
   if (q) {

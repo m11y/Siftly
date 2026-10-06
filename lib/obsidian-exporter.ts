@@ -1,6 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import prisma from '@/lib/db'
+import { postUrl } from '@/lib/platform'
 
 export interface ObsidianExportResult {
   written: number
@@ -36,6 +37,7 @@ interface BookmarkRow {
   text: string
   authorHandle: string
   authorName: string
+  platform: string
   tweetCreatedAt: Date | null
   importedAt: Date
   semanticTags: string | null
@@ -113,7 +115,7 @@ function buildNoteMarkdown(bookmark: BookmarkRow): string {
   const date = bookmark.tweetCreatedAt
     ? new Date(bookmark.tweetCreatedAt).toISOString().split('T')[0]
     : null
-  const sourceUrl = `https://x.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
+  const sourceUrl = postUrl(bookmark)
 
   const frontmatter = [
     '---',

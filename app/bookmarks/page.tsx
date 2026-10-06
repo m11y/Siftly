@@ -30,6 +30,7 @@ interface Filters {
   category: string
   mediaType: string
   source: string
+  platform: string
   sort: string
   page: number
   uncategorized: boolean
@@ -40,6 +41,7 @@ const DEFAULT_FILTERS: Filters = {
   category: '',
   mediaType: '',
   source: '',
+  platform: '',
   sort: 'newest',
   page: 1,
   uncategorized: false,
@@ -55,6 +57,7 @@ function buildUrl(filters: Filters, limit: number): string {
   }
   if (filters.mediaType) params.set('mediaType', filters.mediaType)
   if (filters.source) params.set('source', filters.source)
+  if (filters.platform) params.set('platform', filters.platform)
   params.set('sort', filters.sort)
   params.set('page', String(filters.page))
   params.set('limit', String(limit))
@@ -274,12 +277,17 @@ function BookmarksPageInner() {
     { label: 'Likes', value: 'like' },
   ]
 
+  const platformOptions = [
+    { label: 'X', value: 'x' },
+    { label: '微博', value: 'weibo' },
+  ]
+
   const sortOptions = [
     { label: 'Newest first', value: 'newest' },
     { label: 'Oldest first', value: 'oldest' },
   ]
 
-  const hasActiveFilters = !!(filters.q || filters.category || filters.mediaType || filters.source || filters.sort !== 'newest' || filters.uncategorized)
+  const hasActiveFilters = !!(filters.q || filters.category || filters.mediaType || filters.source || filters.platform || filters.sort !== 'newest' || filters.uncategorized)
 
   const sortLabel = sortOptions.find((o) => o.value === filters.sort)?.label ?? 'Newest first'
 
@@ -325,6 +333,14 @@ function BookmarksPageInner() {
               onChange={(v) => updateFilter('source', v)}
               options={sourceOptions}
               placeholder="All sources"
+            />
+
+            {/* Platform */}
+            <SelectMenu
+              value={filters.platform}
+              onChange={(v) => updateFilter('platform', v)}
+              options={platformOptions}
+              placeholder="All platforms"
             />
 
             {/* Sort */}
@@ -395,6 +411,12 @@ function BookmarksPageInner() {
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-medium">
                   {sourceOptions.find((o) => o.value === filters.source)?.label}
                   <button onClick={() => updateFilter('source', '')} className="text-indigo-400 hover:text-indigo-200 transition-colors"><X size={10} /></button>
+                </span>
+              )}
+              {filters.platform && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-medium">
+                  {platformOptions.find((o) => o.value === filters.platform)?.label}
+                  <button onClick={() => updateFilter('platform', '')} className="text-indigo-400 hover:text-indigo-200 transition-colors"><X size={10} /></button>
                 </span>
               )}
               {filters.sort !== 'newest' && (

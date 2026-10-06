@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkWithMedia } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
+import { postUrl } from '@/lib/platform'
 import MediaLightbox, { type LightboxState } from '@/components/media-lightbox'
 import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, proxyUrl } from '@/components/tweet-parts'
 
@@ -79,9 +80,7 @@ export default function TweetReader({
   }, [onClose])
 
   const isKnownAuthor = bookmark.authorHandle !== 'unknown'
-  const tweetUrl = isKnownAuthor
-    ? `https://x.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
-    : `https://x.com/i/web/status/${bookmark.tweetId}`
+  const tweetUrl = postUrl(bookmark)
   const segments = tweetSegments(bookmark.text, bookmark.links)
   const media = bookmark.mediaItems
   const photoSrcs = media.filter((m) => m.type === 'photo').map((m) => proxyUrl(m.url, bookmark.tweetId))
@@ -105,11 +104,11 @@ export default function TweetReader({
           <div className="min-w-0 flex-1">
             {isKnownAuthor && (
               <p className="text-sm font-semibold text-zinc-100 truncate">
-                <ProfileLink handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
+                <ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
               </p>
             )}
             <p className="text-xs text-zinc-500 truncate">
-              {isKnownAuthor && <><ProfileLink handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>{' · '}</>}
+              {isKnownAuthor && <><ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>{' · '}</>}
               {formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)}
             </p>
           </div>
@@ -136,7 +135,7 @@ export default function TweetReader({
         <div className="overflow-y-auto px-5 py-4 space-y-4">
           {segments.length > 0 && (
             <p className="text-[15px] text-zinc-100 leading-relaxed whitespace-pre-wrap break-words">
-              <TweetText segments={segments} />
+              <TweetText segments={segments} platform={bookmark.platform} />
             </p>
           )}
 
@@ -176,8 +175,8 @@ export default function TweetReader({
           )}
 
           {bookmark.articlePreview && <ArticlePreviewNote tweetUrl={tweetUrl} />}
-          {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} full onOpenPhotos={(srcs, index) => setLightbox({ srcs, index })} />}
-          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
+          {bookmark.quoted && <QuotedTweetBlock platform={bookmark.platform} quoted={bookmark.quoted} full onOpenPhotos={(srcs, index) => setLightbox({ srcs, index })} />}
+          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink platform={bookmark.platform} tweetId={bookmark.quotedTweetId} />}
 
           {categories.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-1">

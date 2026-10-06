@@ -5,6 +5,7 @@ import { BookOpen, ExternalLink, Download, FileText, Play, Pencil, X, Check, Ima
 import type { BookmarkWithMedia, Category } from '@/lib/types'
 import { TweetText, tweetSegments, tweetTextLength } from '@/components/tweet-text'
 import TweetReader from '@/components/tweet-reader'
+import { postUrl } from '@/lib/platform'
 import { ArticlePreviewNote, AuthorAvatar, DeleteButton, ProfileLink, QuotedTweetBlock, QuotesAnotherLink, formatDate, isVideoUrl, previewImageSrc, proxyUrl } from '@/components/tweet-parts'
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
@@ -502,9 +503,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
     setReaderOpen(true)
   }
 
-  const tweetUrl = (bookmark.authorHandle && bookmark.authorHandle !== 'unknown')
-    ? `https://twitter.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
-    : `https://twitter.com/i/web/status/${bookmark.tweetId}`
+  const tweetUrl = postUrl(bookmark)
   const firstMedia = bookmark.mediaItems[0] ?? null
   const hasMedia = bookmark.mediaItems.length > 0
   const dateStr = formatDate(bookmark.tweetCreatedAt ?? bookmark.importedAt ?? null)
@@ -652,12 +651,12 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             <div className="min-w-0">
               {isKnownAuthor && (
                 <p className="text-sm font-semibold text-zinc-100 truncate leading-tight">
-                  <ProfileLink handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
+                  <ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>{bookmark.authorName}</ProfileLink>
                 </p>
               )}
               <p className="text-xs text-zinc-500 truncate">
                 {isKnownAuthor
-                  ? <ProfileLink handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>
+                  ? <ProfileLink platform={bookmark.platform} handle={bookmark.authorHandle}>@{bookmark.authorHandle}</ProfileLink>
                   : dateStr}
                 {bookmark.source === 'quote' && (
                   <span
@@ -716,7 +715,7 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
         <div className={`flex-1 ${previewUrl && !hasText ? '' : 'min-h-[4.5rem]'}`}>
           {hasText && (
             <p className="text-sm text-zinc-200 leading-relaxed">
-              <TweetText segments={segments} limit={expanded ? undefined : TEXT_LIMIT} />
+              <TweetText segments={segments} limit={expanded ? undefined : TEXT_LIMIT} platform={bookmark.platform} />
               {isLong && !expanded && (
                 <span>
                   {'… '}
@@ -745,8 +744,8 @@ export default function BookmarkCard({ bookmark }: BookmarkCardProps) {
             <p className="text-xs text-zinc-700 italic">No text content</p>
           )}
           {bookmark.articlePreview && <ArticlePreviewNote tweetUrl={tweetUrl} />}
-          {bookmark.quoted && <QuotedTweetBlock quoted={bookmark.quoted} />}
-          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink tweetId={bookmark.quotedTweetId} />}
+          {bookmark.quoted && <QuotedTweetBlock platform={bookmark.platform} quoted={bookmark.quoted} />}
+          {!bookmark.quoted && bookmark.quotedTweetId && <QuotesAnotherLink platform={bookmark.platform} tweetId={bookmark.quotedTweetId} />}
           {previewUrl && (
             <LinkPreview url={previewUrl} tweetUrl={tweetUrl} tweetId={bookmark.tweetId} prominent={!hasText} />
           )}

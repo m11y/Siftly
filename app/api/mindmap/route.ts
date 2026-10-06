@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
+import { postUrl } from '@/lib/platform'
 
 interface MindMapNode {
   id: string
@@ -123,6 +124,7 @@ async function getCategoryTweetNodes(categorySlug: string): Promise<MindMapRespo
           tweetId: true,
           text: true,
           authorHandle: true,
+          platform: true,
           authorName: true,
           tweetCreatedAt: true,
           semanticTags: true,
@@ -172,7 +174,7 @@ async function getCategoryTweetNodes(categorySlug: string): Promise<MindMapRespo
         text: truncatedText,
         authorHandle: bookmark.authorHandle,
         authorName: bookmark.authorName,
-        tweetUrl: `https://twitter.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`,
+        tweetUrl: postUrl(bookmark),
         thumbnailUrl,
         hasMedia: firstMedia !== null,
         mediaType: firstMedia?.type ?? null,
