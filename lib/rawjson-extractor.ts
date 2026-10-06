@@ -336,7 +336,11 @@ export async function backfillEntities(
   while (true) {
     if (shouldAbort?.()) break
     const bookmarks = await prisma.bookmark.findMany({
-      where: { OR: [{ entities: null }, { NOT: { entities: { contains: `"v":${ENTITIES_VERSION},` } } }] },
+      // X JSON only; other platforms' entities are written by their own importer.
+      where: {
+        platform: 'x',
+        OR: [{ entities: null }, { NOT: { entities: { contains: `"v":${ENTITIES_VERSION},` } } }],
+      },
       take: CHUNK,
       select: { id: true, rawJson: true },
     })

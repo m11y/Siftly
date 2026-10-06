@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
 import type { MediaItem, QuotedTweetView } from '@/lib/types'
 import { TweetText, tweetSegments } from '@/components/tweet-text'
+import { postUrl, postUrlById, profileUrl } from '@/lib/platform'
 
 const COLOR_PALETTE = [
   '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b',
@@ -92,11 +93,11 @@ export function isVideoUrl(url: string): boolean {
 
 // ── Author profile link ───────────────────────────────────────────────────────
 
-/** Name / @handle linking to the author's X profile, like on X. */
-export function ProfileLink({ handle, className, children }: { handle: string; className?: string; children: React.ReactNode }) {
+/** Name / @handle linking to the author's profile on the post's platform. */
+export function ProfileLink({ platform, handle, className, children }: { platform: string | undefined; handle: string; className?: string; children: React.ReactNode }) {
   return (
     <a
-      href={`https://x.com/${handle}`}
+      href={profileUrl(platform, handle)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
@@ -178,15 +179,11 @@ export function ArticlePreviewNote({ tweetUrl }: { tweetUrl: string }) {
 // Kept visually below the main tweet: cards show one small thumbnail, the
 // reader a compact grid. `full` (the reader) also shows every line of text.
 
-function tweetUrlFor(handle: string, tweetId: string): string {
-  return handle !== 'unknown' ? `https://x.com/${handle}/status/${tweetId}` : `https://x.com/i/web/status/${tweetId}`
-}
-
 /** X sends only one level of quoted tweet; deeper quotes are a link out. */
-export function QuotesAnotherLink({ tweetId }: { tweetId: string }) {
+export function QuotesAnotherLink({ platform, tweetId }: { platform: string | undefined; tweetId: string }) {
   return (
     <a
-      href={`https://x.com/i/web/status/${tweetId}`}
+      href={postUrlById(platform, tweetId)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
@@ -254,12 +251,13 @@ function QuotedMediaGrid({ media, tweetId, onOpenPhotos }: { media: MediaItem[];
   )
 }
 
-export function QuotedTweetBlock({ quoted, full = false, onOpenPhotos }: { quoted: QuotedTweetView; full?: boolean; onOpenPhotos?: OpenPhotos }) {
+/** `platform` is the quoting post's: a post only ever quotes one on its own platform. */
+export function QuotedTweetBlock({ platform, quoted, full = false, onOpenPhotos }: { platform: string | undefined; quoted: QuotedTweetView; full?: boolean; onOpenPhotos?: OpenPhotos }) {
   const segments = tweetSegments(quoted.text, quoted.links)
   const media = quoted.media ?? []
   const header = (
     <a
-      href={tweetUrlFor(quoted.authorHandle, quoted.tweetId)}
+      href={postUrl({ platform, tweetId: quoted.tweetId, authorHandle: quoted.authorHandle })}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
@@ -271,7 +269,7 @@ export function QuotedTweetBlock({ quoted, full = false, onOpenPhotos }: { quote
   )
   const text = segments.length > 0 && (
     <p className={full ? 'mt-1 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap break-words' : 'mt-1 text-xs text-zinc-400 leading-relaxed line-clamp-4'}>
-      <TweetText segments={segments} />
+      <TweetText segments={segments} platform={platform} />
     </p>
   )
   return (
@@ -291,7 +289,7 @@ export function QuotedTweetBlock({ quoted, full = false, onOpenPhotos }: { quote
           </div>
         </div>
       )}
-      {quoted.quotedTweetId && <QuotesAnotherLink tweetId={quoted.quotedTweetId} />}
+      {quoted.quotedTweetId && <QuotesAnotherLink platform={platform} tweetId={quoted.quotedTweetId} />}
     </div>
   )
 }

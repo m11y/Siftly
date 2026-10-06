@@ -10,6 +10,7 @@ export interface BookmarkRow {
   authorHandle: string
   authorName: string
   source?: string
+  platform?: string
   quotedTweetId?: string | null
   note?: string | null
   tweetCreatedAt: Date | null
@@ -33,6 +34,7 @@ export function toBookmarkWithMedia(b: BookmarkRow, quotedRow?: QuotedRow): Book
     authorHandle: b.authorHandle,
     authorName: b.authorName,
     ...(b.source !== undefined ? { source: b.source } : {}),
+    ...(b.platform !== undefined ? { platform: b.platform } : {}),
     tweetCreatedAt: b.tweetCreatedAt?.toISOString() ?? null,
     importedAt: b.importedAt.toISOString(),
     links,

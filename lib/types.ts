@@ -26,6 +26,8 @@ export interface BookmarkWithMedia {
   tweetCreatedAt: string | null
   importedAt?: string
   source?: string
+  /** 'x' | 'weibo' (lib/platform.ts); absent means X. */
+  platform?: string
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
   links?: TweetLink[]

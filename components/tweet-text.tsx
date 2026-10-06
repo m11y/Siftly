@@ -1,5 +1,6 @@
 import React from 'react'
 import type { TweetLink } from '@/lib/types'
+import { mentionUrl } from '@/lib/platform'
 
 const TCO_REGEX = /https?:\/\/t\.co\/\w+/g
 // X handles: 1–15 of [A-Za-z0-9_]; not preceded by a handle char, so e-mail
@@ -59,7 +60,7 @@ export function tweetTextLength(segments: Segment[]): number {
 }
 
 /** Render segments, cut to `limit` visible characters when given. */
-export function TweetText({ segments, limit }: { segments: Segment[]; limit?: number }) {
+export function TweetText({ segments, limit, platform }: { segments: Segment[]; limit?: number; platform?: string }) {
   const nodes: React.ReactNode[] = []
   let budget = limit ?? Infinity
   for (const [i, s] of segments.entries()) {
@@ -70,7 +71,7 @@ export function TweetText({ segments, limit }: { segments: Segment[]; limit?: nu
       nodes.push(
         <a
           key={i}
-          href={`https://x.com/${s.mention}`}
+          href={mentionUrl(platform, s.mention)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}

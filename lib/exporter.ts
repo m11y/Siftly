@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import prisma from '@/lib/db'
+import { postUrl } from '@/lib/platform'
 
 interface BookmarkRow {
   id: string
@@ -110,7 +111,7 @@ export async function exportCategoryAsZip(categorySlug: string): Promise<Buffer>
 
   let mediaIndex = 0
   for (const bookmark of bookmarks) {
-    const tweetUrl = `https://twitter.com/${bookmark.authorHandle}/status/${bookmark.tweetId}`
+    const tweetUrl = postUrl(bookmark)
     const categoryNames = bookmark.categories.map((c) => c.category.name).join('; ')
     const dateStr = bookmark.tweetCreatedAt?.toISOString() ?? ''
 
