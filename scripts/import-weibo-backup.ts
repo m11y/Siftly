@@ -2,7 +2,7 @@
  * Import posts from weibo_backup (the old Django app in ~/workspace/toolkit).
  *
  *   npx tsx --env-file=.env scripts/import-weibo-backup.ts \
- *     --db <toolkit.sqlite3> --media <toolkit MEDIA_ROOT> --ids <id,id,…> [--replace]
+ *     --db <toolkit.sqlite3> --media <toolkit MEDIA_ROOT> (--ids <id,id,…> | --all) [--replace]
  *
  * weibo_backup kept parsed fields, not Weibo's JSON, so each post is rebuilt in
  * the shape of Weibo's API (lib/weibo.ts) and saved like any other import; a
@@ -15,10 +15,16 @@
  * hosts of the same kind. They identify the local copies; only a missing copy
  * would be fetched from them.
  *
+ * --all imports every post the user favorited; originals that were saved only
+ * because a favorited repost carried them come along as its quote rows.
  * --replace deletes already imported posts (with their AI results and notes)
- * and imports them again; without it they are skipped.
+ * and imports them again; without it they are skipped, so a run can be resumed.
+ *
+ * Files are cloned (APFS copy-on-write) when both folders share a volume, so
+ * the copy takes no extra space until either side changes; else plain copies.
  */
 import Database from 'better-sqlite3'
+import { constants } from 'fs'
 import { copyFile, mkdir } from 'fs/promises'
 import path from 'path'
 import prisma from '@/lib/db'
@@ -153,10 +159,25 @@ class Importer {
       if (!dest || (await fileExists(dest))) continue
       if (!(await fileExists(src))) { missing.push(path.relative(this.mediaRoot, src)); continue }
       await mkdir(path.dirname(dest), { recursive: true })
-      await copyFile(src, dest)
+      await copyFile(src, dest, constants.COPYFILE_FICLONE)
       copied++
     }
     return { copied, missing }
+  }
+
+  /**
+   * Every post the user favorited. weibo_backup saved a repost's original with
+   * the repost's favorite time, so a post whose favorite time matches a repost
+   * of it was saved only as that original.
+   */
+  favoritedIds(): string[] {
+    const rows = this.db.prepare(`
+      SELECT id FROM weibo_backup_weibo w
+      WHERE NOT EXISTS (
+        SELECT 1 FROM weibo_backup_weibo p WHERE p.retweeted_status_id = w.id AND p.favorited_at IS w.favorited_at
+      )
+      ORDER BY id`).all() as { id: number }[]
+    return rows.map((r) => String(r.id))
   }
 
   favoritedAt(id: number): Date | null {
@@ -170,15 +191,18 @@ class Importer {
 async function main() {
   const dbPath = arg('db')
   const mediaRoot = arg('media')
-  const ids = (arg('ids') ?? '').split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s))
+  const all = process.argv.includes('--all')
   const replace = process.argv.includes('--replace')
-  if (!dbPath || !mediaRoot || ids.length === 0) {
-    console.error('usage: import-weibo-backup.ts --db <toolkit.sqlite3> --media <MEDIA_ROOT> --ids <id,id,…> [--replace]')
+  if (!dbPath || !mediaRoot || (!all && !arg('ids'))) {
+    console.error('usage: import-weibo-backup.ts --db <toolkit.sqlite3> --media <MEDIA_ROOT> (--ids <id,id,…> | --all) [--replace]')
     process.exit(2)
   }
 
   const db = new Database(dbPath, { readonly: true, fileMustExist: true })
   const importer = new Importer(db, mediaRoot)
+  const ids = all
+    ? importer.favoritedIds()
+    : (arg('ids') ?? '').split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s))
 
   for (const id of ids) {
     const status = importer.status(Number(id))
