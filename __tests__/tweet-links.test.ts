@@ -46,8 +46,8 @@ describe('entities links and quoted tweet', () => {
   })
 
   it('treats missing or old entities as no links', () => {
-    expect(displayEntities(null)).toEqual({ links: [], quoted: null, articlePreview: false })
-    expect(displayEntities('{"hashtags":[]}')).toEqual({ links: [], quoted: null, articlePreview: false })
+    expect(displayEntities(null)).toEqual({ links: [], quoted: null, articlePreview: false, weibo: null })
+    expect(displayEntities('{"hashtags":[]}')).toEqual({ links: [], quoted: null, articlePreview: false, weibo: null })
     expect(tweetSegments('photo https://t.co/abc', [])).toEqual([{ text: 'photo' }])
   })
 })

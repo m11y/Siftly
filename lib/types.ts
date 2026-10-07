@@ -15,6 +15,7 @@ export interface BookmarkCategory {
 }
 
 import type { QuotedTweet, TweetLink } from '@/lib/rawjson-extractor'
+import type { WeiboMeta } from '@/lib/weibo'
 export type { QuotedTweet, TweetLink }
 
 export interface BookmarkWithMedia {
@@ -28,6 +29,8 @@ export interface BookmarkWithMedia {
   source?: string
   /** 'x' | 'weibo' (lib/platform.ts); absent means X. */
   platform?: string
+  /** Weibo posts: post link id, client and region (shown where X shows @handle). */
+  weibo?: WeiboMeta | null
   mediaItems: MediaItem[]
   categories: BookmarkCategory[]
   links?: TweetLink[]
@@ -45,6 +48,8 @@ export interface QuotedTweetView extends QuotedTweet {
   media?: MediaItem[]
   /** The tweet the quoted tweet itself quotes (X sends only its id). */
   quotedTweetId?: string | null
+  /** Weibo: the original post's short id, for its link. */
+  mblogid?: string | null
 }
 
 export interface Category {

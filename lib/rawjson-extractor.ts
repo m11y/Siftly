@@ -3,6 +3,7 @@
  * No AI calls — pure data mining from already-stored JSON.
  */
 import prisma from '@/lib/db'
+import type { WeiboMeta } from '@/lib/weibo'
 
 /** A t.co link in the tweet text and what X says it points to. */
 export interface TweetLink {
@@ -38,6 +39,8 @@ export interface ExtractedEntities {
   quoted: QuotedTweet | null
   /** X Article saved with only its preview (opening it on X with the panel on fills it in). */
   articlePreview: boolean
+  /** Weibo posts only: what the card shows in place of an @handle. */
+  weibo?: WeiboMeta
 }
 
 const KNOWN_TOOL_DOMAINS: Record<string, string> = {
@@ -313,12 +316,12 @@ function extractQuoted(t: any): QuotedTweet | null {
 }
 
 /** The display-only part of a stored `entities` JSON (links, quoted tweet). */
-export function displayEntities(entitiesJson: string | null): { links: TweetLink[]; quoted: QuotedTweet | null; articlePreview: boolean } {
+export function displayEntities(entitiesJson: string | null): { links: TweetLink[]; quoted: QuotedTweet | null; articlePreview: boolean; weibo: WeiboMeta | null } {
   try {
     const e = entitiesJson ? (JSON.parse(entitiesJson) as Partial<ExtractedEntities>) : {}
-    return { links: e.links ?? [], quoted: e.quoted ?? null, articlePreview: e.articlePreview ?? false }
+    return { links: e.links ?? [], quoted: e.quoted ?? null, articlePreview: e.articlePreview ?? false, weibo: e.weibo ?? null }
   } catch {
-    return { links: [], quoted: null, articlePreview: false }
+    return { links: [], quoted: null, articlePreview: false, weibo: null }
   }
 }
 

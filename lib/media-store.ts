@@ -14,6 +14,7 @@ import { pipeline } from 'stream/promises'
 import type { ReadableStream as WebReadableStream } from 'stream/web'
 import prisma from '@/lib/db'
 import { runWithConcurrency } from '@/lib/concurrency'
+import { weiboAvatarUrl } from '@/lib/weibo'
 
 export const MEDIA_DIR = process.env.MEDIA_DIR || path.join(process.cwd(), 'media')
 
@@ -29,6 +30,11 @@ const FETCH_HEADERS = {
 
 const TWIMG_HOSTS = new Set(['pbs.twimg.com', 'video.twimg.com'])
 
+/** Weibo images (wx1.sinaimg.cn, tvax2.sinaimg.cn, …) and videos (f.video.weibocdn.com). */
+export function isWeiboMediaHost(hostname: string): boolean {
+  return hostname.endsWith('.sinaimg.cn') || hostname.endsWith('.weibocdn.com')
+}
+
 /** One file to keep locally: candidate URLs tried in order, saved under `name`. */
 export interface MediaTarget {
   name: string
@@ -37,14 +43,14 @@ export interface MediaTarget {
 }
 
 /**
- * Local file name for an X media URL: the last path segment, plus the extension
- * from `?format=` when the path has none (pbs.twimg.com/media/ID?format=jpg).
+ * Local file name for an X or Weibo media URL: the last path segment, plus the
+ * extension from `?format=` when the path has none (pbs.twimg.com/media/ID?format=jpg).
  * Variants of one image (name=orig/large/…) therefore share a file name.
  */
 export function localName(url: string): string | null {
   let u: URL
   try { u = new URL(url) } catch { return null }
-  if (!TWIMG_HOSTS.has(u.hostname)) return null
+  if (!TWIMG_HOSTS.has(u.hostname) && !isWeiboMediaHost(u.hostname)) return null
   let name = u.pathname.split('/').pop() ?? ''
   if (!name.includes('.')) {
     const format = u.searchParams.get('format')
@@ -89,10 +95,11 @@ function videoVariantUrls(raw: any, posterUrl: string | null): string[] {
     .map((v) => String(v.url))
 }
 
+/** The author's avatar URL from a post's stored JSON: X GraphQL, else Weibo's user.avatar_hd. */
 export function avatarUrlFromRaw(raw: any): string | null {
   const user = raw?.core?.user_results?.result
   const url: unknown = user?.avatar?.image_url ?? user?.legacy?.profile_image_url_https
-  return typeof url === 'string' && url ? url : null
+  return typeof url === 'string' && url ? url : weiboAvatarUrl(raw)
 }
 
 function cardImageUrlFromRaw(raw: any): string | null {

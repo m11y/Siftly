@@ -25,7 +25,9 @@ export interface PostRef {
 /** The post on its platform. */
 export function postUrl(p: PostRef): string {
   if (asPlatform(p.platform) === 'weibo') {
-    return p.mblogid ? `https://weibo.com/${p.authorHandle}/${p.mblogid}` : postUrlById('weibo', p.tweetId)
+    return p.mblogid && p.authorHandle !== 'unknown'
+      ? `https://weibo.com/${p.authorHandle}/${p.mblogid}`
+      : postUrlById('weibo', p.tweetId)
   }
   return p.authorHandle && p.authorHandle !== 'unknown'
     ? `https://x.com/${p.authorHandle}/status/${p.tweetId}`

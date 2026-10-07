@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
 import type { MediaItem, QuotedTweetView } from '@/lib/types'
-import { TweetText, tweetSegments } from '@/components/tweet-text'
+import { TweetText, postSegments } from '@/components/tweet-text'
 import { postUrl, postUrlById, profileUrl } from '@/lib/platform'
 
 const COLOR_PALETTE = [
@@ -157,6 +157,23 @@ export function DeleteButton({ onDelete, size = 13 }: { onDelete: () => Promise<
   )
 }
 
+/**
+ * The line under a Weibo author's name, as weibo_backup's admin shows it: the
+ * post time linking to the post, then the client it was sent from. Weibo has
+ * no @handle (the nickname is the name), so this takes that line's place.
+ */
+export function WeiboSubline({ date, source, href }: { date: string; source?: string | null; href: string }) {
+  return (
+    <>
+      <span className="mr-1.5 px-1.5 py-px rounded bg-orange-500/15 text-[10px] text-orange-300">微博</span>
+      <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="hover:underline">
+        {date}
+      </a>
+      {source && <>{' · 来自 '}{source}</>}
+    </>
+  )
+}
+
 // ── X Article preview ─────────────────────────────────────────────────────────
 
 /** X sends only an article's preview in timelines; opening it on X with the Siftly panel on saves the rest. */
@@ -253,18 +270,25 @@ function QuotedMediaGrid({ media, tweetId, onOpenPhotos }: { media: MediaItem[];
 
 /** `platform` is the quoting post's: a post only ever quotes one on its own platform. */
 export function QuotedTweetBlock({ platform, quoted, full = false, onOpenPhotos }: { platform: string | undefined; quoted: QuotedTweetView; full?: boolean; onOpenPhotos?: OpenPhotos }) {
-  const segments = tweetSegments(quoted.text, quoted.links)
+  const segments = postSegments(platform, quoted.text, quoted.links)
   const media = quoted.media ?? []
   const header = (
     <a
-      href={postUrl({ platform, tweetId: quoted.tweetId, authorHandle: quoted.authorHandle })}
+      href={postUrl({ platform, tweetId: quoted.tweetId, authorHandle: quoted.authorHandle, mblogid: quoted.mblogid })}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
       className="flex items-baseline gap-1.5 text-xs hover:underline min-w-0"
     >
-      <span className="font-semibold text-zinc-300 truncate">{quoted.authorName}</span>
-      <span className="text-zinc-500 truncate">@{quoted.authorHandle}</span>
+      {platform === 'weibo' ? (
+        // Weibo's repost box names the original's author as @nickname.
+        <span className="font-semibold text-zinc-300 truncate">@{quoted.authorName || '原微博'}</span>
+      ) : (
+        <>
+          <span className="font-semibold text-zinc-300 truncate">{quoted.authorName}</span>
+          <span className="text-zinc-500 truncate">@{quoted.authorHandle}</span>
+        </>
+      )}
     </a>
   )
   const text = segments.length > 0 && (
