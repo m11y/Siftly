@@ -54,7 +54,12 @@ function main() {
 
   const post = dst.prepare('SELECT id, platform, source, text, authorHandle, authorName, tweetCreatedAt, importedAt, quotedTweetId, entities FROM Bookmark WHERE tweetId = ?')
   const mediaOf = dst.prepare('SELECT type, url FROM MediaItem WHERE bookmarkId = ? ORDER BY rowid')
-  const videoName = (w: W | undefined) => (w?.video0 ? basename(w.video0).replace(`${w.id}-`, '') : null)
+  // Same rule as the importer: the CDN name, ".mp4" added when missing.
+  const videoName = (w: W | undefined) => {
+    if (!w?.video0) return null
+    const name = basename(w.video0).replace(`${w.id}-`, '')
+    return /\.(mp4|m3u8)$/.test(name) ? name : `${name.replace(/\.[^.]*$/, '')}.mp4`
+  }
   // Prisma stores DateTime in SQLite as epoch milliseconds.
   const ms = (v: unknown) => (v === null || v === undefined ? null : typeof v === 'number' ? v : new Date(String(v)).getTime())
 
@@ -81,7 +86,12 @@ function main() {
     // Media rows: photos in post order, then the video unless it is the original's.
     const pics = (picsOf.all(w.id) as { pic_data: string }[]).map((r) => r.pic_data)
     const video = videoName(w)
-    const ownVideo = video && video !== videoName(w.retweeted_status_id ? byId.get(w.retweeted_status_id) : undefined) ? video : null
+    let ownVideo = video && video !== videoName(w.retweeted_status_id ? byId.get(w.retweeted_status_id) : undefined) ? video : null
+    if (ownVideo?.endsWith('.m3u8')) {
+      // A live stream's playlist: weibo_backup never saved the video itself.
+      problem('nothing to migrate: live-stream playlist only', id)
+      ownVideo = null
+    }
     const expected = [...pics.map((f) => `photo:${basename(f)}`), ...(ownVideo ? [`video:${ownVideo}`] : [])]
     const actual = (mediaOf.all(p.id) as { type: string; url: string }[]).map((m) => `${m.type}:${basename(m.url)}`)
     if (expected.join('|') !== actual.join('|')) problem('media rows', `${id} expected [${expected.length}] got [${actual.length}]`)
@@ -113,7 +123,7 @@ function main() {
   }
   src.close()
   dst.close()
-  const onlySourceGaps = [...problems.keys()].every((k) => k.startsWith('source file missing'))
+  const onlySourceGaps = [...problems.keys()].every((k) => k.startsWith('source file missing') || k.startsWith('nothing to migrate'))
   process.exit(problems.size === 0 || onlySourceGaps ? 0 : 1)
 }
 

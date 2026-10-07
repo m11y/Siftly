@@ -20,11 +20,11 @@
  * --replace deletes already imported posts (with their AI results and notes)
  * and imports them again; without it they are skipped, so a run can be resumed.
  *
- * Files are cloned (APFS copy-on-write) when both folders share a volume, so
- * the copy takes no extra space until either side changes; else plain copies.
+ * Files are plain copies: Node's COPYFILE_FICLONE is not implemented on macOS
+ * (it falls back to copying), and once weibo_backup's folder is removed a clone
+ * would take the same space anyway.
  */
 import Database from 'better-sqlite3'
-import { constants } from 'fs'
 import { copyFile, mkdir } from 'fs/promises'
 import path from 'path'
 import prisma from '@/lib/db'
@@ -76,6 +76,12 @@ function utc(value: string | null): Date | null {
 
 const basename = (p: string) => p.split('/').pop() ?? p
 
+/** Local name of a saved video: its CDN name, with ".mp4" when that name lacks it. */
+function videoFileName(postId: number, stored: string): string {
+  const name = basename(stored).replace(`${postId}-`, '')
+  return /\.(mp4|m3u8)$/.test(name) ? name : `${name.replace(/\.[^.]*$/, '')}.mp4`
+}
+
 class Importer {
   /** Local copy to make for each media URL, per post. */
   private files = new Map<string, Map<string, string>>()
@@ -110,10 +116,13 @@ class Importer {
       this.file(postId, url, p.pic_data)
     }
 
-    // The video was saved as "<post id>-<name>".
+    // The video was saved as "<post id>-<name>", <name> being the CDN's. A few
+    // names have no or a wrong extension ("file", "….json") though all of them
+    // are MP4, so they get ".mp4". A live stream's .m3u8 is only a playlist
+    // (weibo_backup never fetched its video); the parser drops it.
     let pageInfo: WeiboStatus['page_info']
     if (w.video0) {
-      const url = `https://f.video.weibocdn.com/o0/${basename(w.video0).replace(`${w.id}-`, '')}`
+      const url = `https://f.video.weibocdn.com/o0/${videoFileName(w.id, w.video0)}`
       pageInfo = { object_type: 'video', media_info: { mp4_hd_url: url } }
       this.file(postId, url, w.video0)
     }
@@ -159,7 +168,7 @@ class Importer {
       if (!dest || (await fileExists(dest))) continue
       if (!(await fileExists(src))) { missing.push(path.relative(this.mediaRoot, src)); continue }
       await mkdir(path.dirname(dest), { recursive: true })
-      await copyFile(src, dest, constants.COPYFILE_FICLONE)
+      await copyFile(src, dest)
       copied++
     }
     return { copied, missing }
