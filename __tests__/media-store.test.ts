@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { collectTargets, largeAvatarUrl, localName } from '@/lib/media-store'
+import { collectTargets, largeAvatarUrl, localName, mediaFetchHeaders } from '@/lib/media-store'
+import { parseWeiboStatus } from '@/lib/weibo'
+import { original } from './fixtures/weibo'
 
 describe('localName', () => {
   it('keeps the X file name and drops the size query', () => {
@@ -67,5 +69,38 @@ describe('collectTargets', () => {
       mediaItems: [{ type: 'video', url: 'https://video.twimg.com/ext_tw_video/1/pu/vid/V.mp4', thumbnailUrl: 'https://video.twimg.com/ext_tw_video/1/pu/vid/V.mp4' }],
     })
     expect(targets.map((t) => t.name)).toEqual(['V.mp4'])
+  })
+})
+
+describe('collectTargets for Weibo', () => {
+  it('keeps each stored URL as the only candidate: photos, video and poster, avatar', () => {
+    const post = {
+      ...original,
+      page_info: {
+        object_type: 'video',
+        page_pic: { url: 'https://wx3.sinaimg.cn/orj480/poster.jpg' },
+        media_info: { mp4_720p_mp4: 'https://f.video.weibocdn.com/o0/v720.mp4?label=mp4_720p&Expires=1&ssig=s' },
+      },
+    }
+    const parsed = parseWeiboStatus(post)
+    const targets = collectTargets({
+      rawJson: parsed.rawJson,
+      mediaItems: parsed.media.map((m) => ({ type: m.type, url: m.url, thumbnailUrl: m.thumbnailUrl ?? null })),
+    })
+    expect(targets.map((t) => [t.name, t.candidates])).toEqual([
+      ['p1.jpg', ['https://wx1.sinaimg.cn/large/p1.jpg']],
+      ['p2.jpg', ['https://wx1.sinaimg.cn/large/p2.jpg']],
+      ['v720.mp4', ['https://f.video.weibocdn.com/o0/v720.mp4?label=mp4_720p&Expires=1&ssig=s']],
+      ['poster.jpg', ['https://wx3.sinaimg.cn/orj480/poster.jpg']],
+      ['av222.jpg', ['https://tvax1.sinaimg.cn/large/av222.jpg']],
+    ])
+  })
+})
+
+describe('mediaFetchHeaders', () => {
+  it('sends a Weibo Referer to Weibo CDNs and an X one otherwise', () => {
+    expect(mediaFetchHeaders('https://wx1.sinaimg.cn/large/p1.jpg').Referer).toBe('https://weibo.com/')
+    expect(mediaFetchHeaders('https://f.video.weibocdn.com/o0/v.mp4').Referer).toBe('https://weibo.com/')
+    expect(mediaFetchHeaders('https://pbs.twimg.com/media/a.jpg').Referer).toBe('https://twitter.com/')
   })
 })

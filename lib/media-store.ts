@@ -1,6 +1,6 @@
 /**
- * Local copies of X media: tweet photos, videos (+ posters), author avatars and
- * link-card images, stored as MEDIA_DIR/<tweetId>/<X's own file name>.
+ * Local copies of X and Weibo media: photos, videos (+ posters), author avatars
+ * and X link-card images, stored as MEDIA_DIR/<tweetId>/<the CDN's own file name>.
  *
  * File existence is the only state: a download writes `<name>.part` and renames
  * it on success, so a present file is always complete. Every pipeline run tries
@@ -23,16 +23,23 @@ const DOWNLOAD_CONCURRENCY = 2
 const PHOTO_TIMEOUT_MS = 60_000
 const VIDEO_TIMEOUT_MS = 15 * 60_000
 
-const FETCH_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  Referer: 'https://twitter.com/',
-}
-
 const TWIMG_HOSTS = new Set(['pbs.twimg.com', 'video.twimg.com'])
 
 /** Weibo images (wx1.sinaimg.cn, tvax2.sinaimg.cn, …) and videos (f.video.weibocdn.com). */
 export function isWeiboMediaHost(hostname: string): boolean {
   return hostname.endsWith('.sinaimg.cn') || hostname.endsWith('.weibocdn.com')
+}
+
+/** Request headers for a media CDN: Weibo's refuses (403) a Referer that isn't Weibo. */
+export function mediaFetchHeaders(url: string): Record<string, string> {
+  let weibo = false
+  try { weibo = isWeiboMediaHost(new URL(url).hostname) } catch { /* not a URL: X defaults */ }
+  const site = weibo ? 'https://weibo.com' : 'https://twitter.com'
+  return {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    Referer: `${site}/`,
+    Origin: site,
+  }
 }
 
 /** One file to keep locally: candidate URLs tried in order, saved under `name`. */
@@ -70,10 +77,14 @@ export async function fileExists(p: string): Promise<boolean> {
   try { await access(p); return true } catch { return false }
 }
 
-/** pbs.twimg.com image URL at each size, largest first, then the URL as stored. */
+/**
+ * pbs.twimg.com image URL at each size, largest first, then the URL as stored.
+ * Other hosts (Weibo) only the stored URL: it already names the largest size.
+ */
 function imageCandidates(url: string): string[] {
   let u: URL
   try { u = new URL(url) } catch { return [] }
+  if (!TWIMG_HOSTS.has(u.hostname)) return [url]
   const sized = ['orig', '4096x4096', 'large', 'medium'].map((size) => {
     const v = new URL(u)
     v.searchParams.set('name', size)
@@ -160,7 +171,7 @@ export function collectTargets(b: {
 async function downloadTo(url: string, dest: string, timeoutMs: number): Promise<boolean> {
   const part = `${dest}.part`
   try {
-    const res = await fetch(url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(timeoutMs) })
+    const res = await fetch(url, { headers: mediaFetchHeaders(url), signal: AbortSignal.timeout(timeoutMs) })
     if (!res.ok || !res.body) return false
     await pipeline(Readable.fromWeb(res.body as WebReadableStream), createWriteStream(part))
     await rename(part, dest)
@@ -240,10 +251,19 @@ export async function targetForUrl(tweetId: string, url: string): Promise<MediaT
   if (!name || !/^\d+$/.test(tweetId)) return null
   const b = await prisma.bookmark.findUnique({
     where: { tweetId },
-    select: { platform: true, rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
+    select: { rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
   })
-  // collectTargets knows X's media URLs only.
-  return b?.platform === 'x' ? collectTargets(b).find((t) => t.name === name) ?? null : null
+  return b ? collectTargets(b).find((t) => t.name === name) ?? null : null
+}
+
+/** Download one bookmark's missing media now, instead of waiting for the pipeline's media stage. */
+export async function downloadBookmarkMedia(tweetId: string): Promise<void> {
+  if (!/^\d+$/.test(tweetId)) return
+  const b = await prisma.bookmark.findUnique({
+    where: { tweetId },
+    select: { rawJson: true, mediaItems: { select: { type: true, url: true, thumbnailUrl: true } } },
+  })
+  if (b) await Promise.all(collectTargets(b).map((t) => ensureMedia(tweetId, t)))
 }
 
 /**
@@ -261,8 +281,7 @@ export async function downloadMissingMedia(
 
   while (!shouldAbort?.()) {
     const rows = await prisma.bookmark.findMany({
-      // collectTargets knows X's media URLs only.
-      where: { platform: 'x', ...(cursor ? { id: { gt: cursor } } : {}) },
+      where: cursor ? { id: { gt: cursor } } : {},
       orderBy: { id: 'asc' },
       take: CHUNK,
       select: {

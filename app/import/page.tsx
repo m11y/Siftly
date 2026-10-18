@@ -69,30 +69,34 @@ const STAGE_INFO: Record<NonNullable<Stage>, { label: string; icon: React.ReactN
   },
 }
 
-// ── Bookmarklet script (captures Twitter/X bookmark API responses as you scroll) ──
+// ── Bookmarklet script (captures X bookmark/like and Weibo favorite API responses as you scroll) ──
 
 const BOOKMARKLET_SCRIPT = `(function(){
   var host=location.hostname;
-  if(!(host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com'))){alert('Siftly: 请在 x.com 的点赞页或书签页使用');return;}
+  var PLATFORM=(host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com'))?'x'
+    :(host==='weibo.com'||host==='www.weibo.com')?'weibo':null;
+  if(!PLATFORM){alert('Siftly: 请在 x.com 的点赞页、书签页，或 weibo.com 的收藏页使用');return;}
   // Replaced with the Siftly page's own origin when the bookmarklet link is rendered.
   var SIFTLY='__SIFTLY_ORIGIN__';
   if(window.__siftlyLive){window.__siftlyLive.reconnect();return;}
   var Z='2147483647';
-  // X is a single-page app: capture only while the current page is a likes or bookmarks timeline.
-  // Likes: /i/history/likes (current) or /<user>/likes (older). Bookmarks: /i/bookmarks[/<folder>].
+  // Both sites are single-page apps: capture only while the current page is a list we keep.
+  // X likes: /i/history/likes (current) or /<user>/likes (older). X bookmarks: /i/bookmarks[/<folder>].
+  // Weibo favorites: /u/favorites.
   function pageSource(){
+    if(PLATFORM==='weibo')return location.pathname==='/u/favorites'?'bookmark':null;
     var parts=location.pathname.split('/').filter(Boolean);
     if(parts[parts.length-1]==='likes'&&(parts.length===2||(parts[0]==='i'&&parts[1]==='history')))return 'like';
     if(parts[0]==='i'&&parts[1]==='bookmarks')return 'bookmark';
     return null;
   }
-  var seen=new Set(),queue=[],inFlight=null,paused=false,collected=0;
+  var seen=new Set(),queue=[],inFlight=null,paused=false,collected=0,pendingWeibo=0;
   var totals={imported:0,updated:0,skipped:0,completed:0};
   var relay=null,relayReady=false,note='';
 
   // ── Panel: fixed top-right, above everything on x.com ──
   function el(tag,style,text){var e=document.createElement(tag);if(style)Object.assign(e.style,style);if(text!=null)e.textContent=text;return e;}
-  var panel=el('div',{position:'fixed',top:'12px',right:'12px',zIndex:Z,width:'236px',padding:'10px 12px',
+  var panel=el('div',{position:'fixed',top:PLATFORM==='weibo'?'72px':'12px',right:'12px',zIndex:Z,width:'236px',padding:'10px 12px',
     background:'#18181b',color:'#e4e4e7',border:'1px solid #3f3f46',borderRadius:'10px',
     boxShadow:'0 6px 24px rgba(0,0,0,.45)',fontFamily:'system-ui,sans-serif',fontSize:'12px',lineHeight:'1.5'});
   var head=el('div',{display:'flex',alignItems:'center',gap:'6px'});
@@ -116,20 +120,20 @@ const BOOKMARKLET_SCRIPT = `(function(){
     title.textContent='Siftly '+(paused?'已暂停':connected?'已连接':connecting?'连接中…':'已断开');
     pauseBtn.textContent=paused?'▶':'⏸';pauseBtn.title=paused?'继续收集':'暂停收集';
     line1.textContent='已收集 '+collected+' · 新增 '+totals.imported+' · 刷新 '+totals.updated+(totals.completed?' · 补全文章 '+totals.completed:'');
-    line2.textContent='已存在 '+totals.skipped+' · 待发送 '+(queue.length+(inFlight?inFlight.items.length:0));
-    var hint=note||(pageSource()?'':'当前页面不收集（仅点赞页、书签页）');
+    line2.textContent='已存在 '+totals.skipped+' · 待发送 '+(queue.length+pendingWeibo+(inFlight?inFlight.items.length:0));
+    var hint=note||(pageSource()?'':PLATFORM==='weibo'?'当前页面不收集（仅收藏页）':'当前页面不收集（仅点赞页、书签页）');
     line3.textContent=hint;line3.style.display=hint?'block':'none';
     reconnectBtn.style.display=connected||connecting?'none':'block';
   }
 
-  // ── Relay window: the only route to Siftly that x.com's CSP allows ──
+  // ── Relay window: the only route to Siftly that x.com's CSP allows (weibo.com reuses it) ──
   var readyTimer=null;
   function connect(){
     var w=360,h=220;
     var left=(screen.availLeft||0)+screen.availWidth-w-24,top=(screen.availTop||0)+screen.availHeight-h-48;
     relay=window.open(SIFTLY+'/import/receive','siftly-relay','popup,width='+w+',height='+h+',left='+left+',top='+top);
     relayReady=false;
-    note=relay?'':'弹窗被拦截：允许 x.com 弹窗后点“重新连接”';
+    note=relay?'':'弹窗被拦截：允许 '+host+' 弹窗后点“重新连接”';
     clearTimeout(readyTimer);
     if(relay)readyTimer=setTimeout(function(){if(!relayReady){note='Siftly 无响应（'+SIFTLY+'），确认服务在运行后点“重新连接”';render();}},20000);
     render();
@@ -149,7 +153,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
       else if(inFlight.source==='complete'){totals.completed+=e.data.updated||0;note='';}
       else{
         totals.imported+=e.data.imported||0;totals.updated+=e.data.updated||0;totals.skipped+=e.data.skipped||0;note='';
-        inFlight.items.forEach(function(x){savedIds.add(x.tweet.rest_id);});scheduleScan();
+        inFlight.items.forEach(function(x){savedIds.add(x.id);});scheduleScan();
       }
       inFlight=null;render();flush();
     }
@@ -167,7 +171,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     inFlight={id:id,source:source,items:items,timer:setTimeout(function(){
       if(inFlight&&inFlight.id===id){queue=inFlight.items.concat(queue);inFlight=null;note='发送超时，稍后重试';render();}
     },60000)};
-    relay.postMessage({type:'siftly:import',batchId:id,source:source,tweets:items.map(function(x){return x.tweet;})},SIFTLY);
+    relay.postMessage({type:'siftly:import',batchId:id,platform:PLATFORM,source:source,tweets:items.map(function(x){return x.tweet;})},SIFTLY);
     render();
   }
   var tick=setInterval(function(){
@@ -187,9 +191,12 @@ const BOOKMARKLET_SCRIPT = `(function(){
   }
   function addTweet(t){
     if(paused||!t||!t.rest_id)return;
-    if(hasArticleBody(t)&&!seenArticles.has(t.rest_id)){seenArticles.add(t.rest_id);queue.push({source:'complete',tweet:t});}
+    if(hasArticleBody(t)&&!seenArticles.has(t.rest_id)){seenArticles.add(t.rest_id);queue.push({source:'complete',id:t.rest_id,tweet:t});}
     var source=pageSource();if(!source||seen.has(t.rest_id))return;
-    seen.add(t.rest_id);queue.push({source:source,tweet:t});collected++;render();
+    seen.add(t.rest_id);enqueue(source,t.rest_id,t);
+  }
+  function enqueue(source,id,t){
+    queue.push({source:source,id:id,tweet:t});collected++;render();
     if(queue.length>=BATCH)flush();
   }
   function isTweetEntry(o){return o&&typeof o.entryId==='string'&&o.entryId.indexOf('tweet-')===0;}
@@ -204,14 +211,64 @@ const BOOKMARKLET_SCRIPT = `(function(){
     if(isTweetEntry(obj)){var r=obj.content&&obj.content.itemContent&&obj.content.itemContent.tweet_results&&obj.content.itemContent.tweet_results.result;var tw=unwrapTweet(r);if(tw)addTweet(tw);}
     for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)){deepFindTweets(obj[k],depth+1);}}
   }
-  function processData(d){deepFindTweets(d,0);}
-  function isApiUrl(u){return u.includes('/graphql/')||u.includes('/i/api/')||u.includes('/2/timeline');}
+  // ── Weibo: the favorites list's statuses, sent as the web API returns them ──
+  // A status is an object with an id, mblogid and user; its retweeted_status
+  // travels inside it. List entries carry only the first part of a long post
+  // (isLongText); its full text is fetched here, logged in, and stored the way
+  // Siftly's parser reads it (longText.content). If that fails the post is still
+  // saved, truncated.
+  function isWeiboStatus(o){return o&&(o.idstr||o.id)&&typeof o.mblogid==='string'&&o.user&&typeof o.user==='object';}
+  function fillLongText(s){
+    if(!s||!s.isLongText||(s.longText&&s.longText.content))return Promise.resolve();
+    return origFetch.call(window,'/ajax/statuses/longtext?id='+encodeURIComponent(s.mblogid),{credentials:'include'})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        var d=j&&j.data;
+        if(d&&d.longTextContent){s.longText={content:d.longTextContent};if(Array.isArray(d.url_struct))s.url_struct=d.url_struct;}
+      })
+      .catch(function(){});
+  }
+  var weiboChain=Promise.resolve();
+  function addWeibo(s){
+    var id=String(s.idstr||s.id),source=pageSource();
+    if(paused||!source||seen.has(id))return;
+    seen.add(id);pendingWeibo++;
+    // One long-text request at a time, in list order.
+    weiboChain=weiboChain.then(function(){return fillLongText(s);}).then(function(){return fillLongText(s.retweeted_status);})
+      .then(function(){pendingWeibo--;enqueue(source,id,s);});
+  }
+  function deepFindWeibo(obj,depth){
+    if(!obj||typeof obj!=='object'||depth>16)return;
+    if(Array.isArray(obj)){obj.forEach(function(item){deepFindWeibo(item,depth+1);});return;}
+    if(isWeiboStatus(obj)){addWeibo(obj);return;}
+    for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)){deepFindWeibo(obj[k],depth+1);}}
+  }
+
+  // Weibo: only the favorites list's own requests (their path names "fav"), so
+  // posts the page shows beside the list are never saved as favorites. Other
+  // /ajax/ responses on the favorites page that hold posts are named in the
+  // panel, in case Weibo renames the endpoint.
+  function hasWeiboStatus(obj,depth){
+    if(!obj||typeof obj!=='object'||depth>16)return false;
+    if(isWeiboStatus(obj))return true;
+    for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)&&hasWeiboStatus(obj[k],depth+1))return true;}
+    return false;
+  }
+  function processData(d,u){
+    if(PLATFORM!=='weibo'){deepFindTweets(d,0);return;}
+    if(u.indexOf('fav')>=0){deepFindWeibo(d,0);return;}
+    if(pageSource()&&hasWeiboStatus(d,0)){note='未识别的接口 '+u.split('?')[0];render();}
+  }
+  function isApiUrl(u){
+    if(PLATFORM==='weibo')return u.includes('/ajax/');
+    return u.includes('/graphql/')||u.includes('/i/api/')||u.includes('/2/timeline');
+  }
   var origFetch=window.fetch;
   window.fetch=async function(){
     var r=await origFetch.apply(this,arguments);
     try{
       var u=arguments[0] instanceof Request?arguments[0].url:String(arguments[0]);
-      if(isApiUrl(u)){var ct=r.headers.get('content-type')||'';if(ct.includes('json')){var d=await r.clone().json();processData(d);}}
+      if(isApiUrl(u)){var ct=r.headers.get('content-type')||'';if(ct.includes('json')){var d=await r.clone().json();processData(d,u);}}
     }catch(ex){}
     return r;
   };
@@ -219,11 +276,11 @@ const BOOKMARKLET_SCRIPT = `(function(){
   XMLHttpRequest.prototype.open=function(){xhrUrls.set(this,String(arguments[1]||''));return origOpen.apply(this,arguments);};
   XMLHttpRequest.prototype.send=function(){
     var xhr=this,u=xhrUrls.get(xhr)||'';
-    if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText));}catch(ex){}});}
+    if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText),u);}catch(ex){}});}
     return origSend.apply(this,arguments);
   };
 
-  // ── ✓ marks on tweets already in Siftly (any X page, also while paused) ──
+  // ── ✓ marks on tweets already in Siftly (any X page, also while paused; not on Weibo) ──
   // X renders each tweet as article[data-testid=tweet] and recycles those nodes
   // while scrolling, so marks are re-applied from a MutationObserver.
   var savedIds=new Set(),checkedIds=new Set(),lookupInFlight=null;
@@ -263,10 +320,13 @@ const BOOKMARKLET_SCRIPT = `(function(){
     },30000)};
     relay.postMessage({type:'siftly:lookup',lookupId:id,tweetIds:ids},SIFTLY);
   }
-  var observer=new MutationObserver(scheduleScan);
-  observer.observe(document.body,{childList:true,subtree:true});
-  var lookupTick=setInterval(lookup,1500);
-  scan();
+  var observer=null,lookupTick=null;
+  if(PLATFORM==='x'){
+    observer=new MutationObserver(scheduleScan);
+    observer.observe(document.body,{childList:true,subtree:true});
+    lookupTick=setInterval(lookup,1500);
+    scan();
+  }
 
   // ── Auto-scroll ──
   var autoScrolling=false;
@@ -310,7 +370,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
   reconnectBtn.onclick=function(){connect();};
   closeBtn.onclick=function(){
     autoScrolling=false;clearInterval(tick);clearInterval(lookupTick);clearTimeout(readyTimer);clearTimeout(scanTimer);
-    observer.disconnect();document.querySelectorAll('[data-siftly-badge]').forEach(function(b){b.remove();});
+    if(observer)observer.disconnect();document.querySelectorAll('[data-siftly-badge]').forEach(function(b){b.remove();});
     window.fetch=origFetch;XMLHttpRequest.prototype.open=origOpen;XMLHttpRequest.prototype.send=origSend;
     if(relay&&!relay.closed)relay.postMessage({type:'siftly:bye'},SIFTLY);
     panel.remove();delete window.__siftlyLive;
@@ -642,6 +702,12 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
           </a>{' '}
           while logged in
         </span>
+      ),
+      content: (
+        <p className="text-xs text-zinc-500 mt-1">
+          Weibo favorites: the same bookmarklet works on your Weibo favorites page (weibo.com → 我的收藏,{' '}
+          <code className="text-zinc-400">weibo.com/u/favorites</code>), logged in.
+        </p>
       ),
     },
     {
