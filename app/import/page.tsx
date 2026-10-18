@@ -82,9 +82,9 @@ const BOOKMARKLET_SCRIPT = `(function(){
   var Z='2147483647';
   // Both sites are single-page apps: capture only while the current page is a list we keep.
   // X likes: /i/history/likes (current) or /<user>/likes (older). X bookmarks: /i/bookmarks[/<folder>].
-  // Weibo favorites: /u/page/fav/<uid>.
+  // Weibo favorites: /u/favorites (current) or /u/page/fav/<uid>.
   function pageSource(){
-    if(PLATFORM==='weibo')return location.pathname.indexOf('/u/page/fav')===0?'bookmark':null;
+    if(PLATFORM==='weibo')return /^[/]u[/](favorites|page[/]fav)/.test(location.pathname)?'bookmark':null;
     var parts=location.pathname.split('/').filter(Boolean);
     if(parts[parts.length-1]==='likes'&&(parts.length===2||(parts[0]==='i'&&parts[1]==='history')))return 'like';
     if(parts[0]==='i'&&parts[1]==='bookmarks')return 'bookmark';
@@ -244,9 +244,23 @@ const BOOKMARKLET_SCRIPT = `(function(){
     for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)){deepFindWeibo(obj[k],depth+1);}}
   }
 
-  function processData(d){if(PLATFORM==='weibo')deepFindWeibo(d,0);else deepFindTweets(d,0);}
+  // Weibo: only the favorites list's own requests (their path names "fav"), so
+  // posts the page shows beside the list are never saved as favorites. Other
+  // /ajax/ responses on the favorites page that hold posts are named in the
+  // panel, in case Weibo renames the endpoint.
+  function hasWeiboStatus(obj,depth){
+    if(!obj||typeof obj!=='object'||depth>16)return false;
+    if(isWeiboStatus(obj))return true;
+    for(var k in obj){if(Object.prototype.hasOwnProperty.call(obj,k)&&hasWeiboStatus(obj[k],depth+1))return true;}
+    return false;
+  }
+  function processData(d,u){
+    if(PLATFORM!=='weibo'){deepFindTweets(d,0);return;}
+    if(u.indexOf('fav')>=0){deepFindWeibo(d,0);return;}
+    if(pageSource()&&hasWeiboStatus(d,0)){note='未识别的接口 '+u.split('?')[0];render();}
+  }
   function isApiUrl(u){
-    if(PLATFORM==='weibo')return u.includes('/ajax/favorites/');
+    if(PLATFORM==='weibo')return u.includes('/ajax/');
     return u.includes('/graphql/')||u.includes('/i/api/')||u.includes('/2/timeline');
   }
   var origFetch=window.fetch;
@@ -254,7 +268,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
     var r=await origFetch.apply(this,arguments);
     try{
       var u=arguments[0] instanceof Request?arguments[0].url:String(arguments[0]);
-      if(isApiUrl(u)){var ct=r.headers.get('content-type')||'';if(ct.includes('json')){var d=await r.clone().json();processData(d);}}
+      if(isApiUrl(u)){var ct=r.headers.get('content-type')||'';if(ct.includes('json')){var d=await r.clone().json();processData(d,u);}}
     }catch(ex){}
     return r;
   };
@@ -262,7 +276,7 @@ const BOOKMARKLET_SCRIPT = `(function(){
   XMLHttpRequest.prototype.open=function(){xhrUrls.set(this,String(arguments[1]||''));return origOpen.apply(this,arguments);};
   XMLHttpRequest.prototype.send=function(){
     var xhr=this,u=xhrUrls.get(xhr)||'';
-    if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText));}catch(ex){}});}
+    if(isApiUrl(u)){xhr.addEventListener('load',function(){try{processData(JSON.parse(xhr.responseText),u);}catch(ex){}});}
     return origSend.apply(this,arguments);
   };
 
@@ -692,7 +706,7 @@ function BookmarkletTab({ onFile, importSource }: { onFile: (file: File) => void
       content: (
         <p className="text-xs text-zinc-500 mt-1">
           Weibo favorites: the same bookmarklet works on your Weibo favorites page (weibo.com → 我的收藏,{' '}
-          <code className="text-zinc-400">weibo.com/u/page/fav/&lt;your uid&gt;</code>), logged in.
+          <code className="text-zinc-400">weibo.com/u/favorites</code>), logged in.
         </p>
       ),
     },
