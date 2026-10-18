@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
-// Relay window opened by the bookmarklet from x.com. x.com's CSP (connect-src,
+// Relay window opened by the bookmarklet from x.com (or weibo.com, same protocol
+// with platform: 'weibo' on each batch). x.com's CSP (connect-src,
 // frame-src, form-action) blocks every direct route to this local server, but
 // not opening a window to it, so the bookmarklet streams captured tweets here in
 // batches via postMessage and this page imports them through its own API.
 // It stays open in the background for the whole session; the user never needs
 // to look at it — the live status is the panel the bookmarklet shows on x.com.
 
-const X_ORIGINS = new Set(['https://x.com', 'https://twitter.com'])
+const SITE_ORIGINS = new Set(['https://x.com', 'https://twitter.com', 'https://weibo.com', 'https://www.weibo.com'])
 const PIPELINE_POLL_MS = 10_000
 
 interface Totals { batches: number; imported: number; updated: number; skipped: number }
@@ -57,8 +58,8 @@ export default function ReceivePage() {
     }, PIPELINE_POLL_MS)
 
     async function onMessage(e: MessageEvent) {
-      if (!X_ORIGINS.has(e.origin) || e.source !== opener) return
-      const data = e.data as { type?: string; batchId?: number; lookupId?: number; source?: string; tweets?: unknown[]; tweetIds?: unknown[] } | null
+      if (!SITE_ORIGINS.has(e.origin) || e.source !== opener) return
+      const data = e.data as { type?: string; batchId?: number; lookupId?: number; source?: string; platform?: string; tweets?: unknown[]; tweetIds?: unknown[] } | null
       if (data?.type === 'siftly:bye') { window.close(); return }
       if (data?.type === 'siftly:lookup' && Array.isArray(data.tweetIds)) {
         // Which tweets visible on X are saved (for the ✓ marks). A failed lookup
@@ -83,7 +84,7 @@ export default function ReceivePage() {
         const res = await fetch('/api/import/bookmarklet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: data.source, tweets: data.tweets }),
+          body: JSON.stringify({ source: data.source, platform: data.platform, tweets: data.tweets }),
         })
         const result = (await res.json()) as { imported?: number; updated?: number; skipped?: number; error?: string }
         if (!res.ok) throw new Error(result.error ?? `Import failed (${res.status})`)
@@ -105,7 +106,7 @@ export default function ReceivePage() {
 
     window.addEventListener('message', onMessage)
     // The opener's exact origin is unknown here; postMessage drops non-matching targets.
-    for (const origin of X_ORIGINS) opener.postMessage({ type: 'siftly:ready' }, origin)
+    for (const origin of SITE_ORIGINS) opener.postMessage({ type: 'siftly:ready' }, origin)
     return () => {
       window.removeEventListener('message', onMessage)
       clearInterval(poll)
@@ -115,7 +116,7 @@ export default function ReceivePage() {
   if (!hasOpener) {
     return (
       <div className="p-6 text-sm text-zinc-400">
-        This window relays tweets from the Siftly bookmarklet. Run the bookmarklet on your X likes or bookmarks page.
+        This window relays posts from the Siftly bookmarklet. Run the bookmarklet on your X likes or bookmarks page, or your Weibo favorites page.
       </div>
     )
   }
@@ -125,7 +126,7 @@ export default function ReceivePage() {
       <p className="font-semibold text-zinc-100 flex items-center gap-2">
         Siftly 中转窗口 {busy && <Loader2 size={14} className="animate-spin text-indigo-400" />}
       </p>
-      <p className="text-xs text-zinc-500">保持打开，放到后台即可；状态看 x.com 右上角的面板。</p>
+      <p className="text-xs text-zinc-500">保持打开，放到后台即可；状态看 x.com / weibo.com 右上角的面板。</p>
       <p className="text-zinc-300">
         {totals.batches} 批 · 新增 {totals.imported} · 刷新 {totals.updated} · 已有 {totals.skipped}
       </p>
