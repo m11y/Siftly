@@ -82,9 +82,9 @@ const BOOKMARKLET_SCRIPT = `(function(){
   var Z='2147483647';
   // Both sites are single-page apps: capture only while the current page is a list we keep.
   // X likes: /i/history/likes (current) or /<user>/likes (older). X bookmarks: /i/bookmarks[/<folder>].
-  // Weibo favorites: /u/favorites (current) or /u/page/fav/<uid>.
+  // Weibo favorites: /u/favorites.
   function pageSource(){
-    if(PLATFORM==='weibo')return /^[/]u[/](favorites|page[/]fav)/.test(location.pathname)?'bookmark':null;
+    if(PLATFORM==='weibo')return location.pathname==='/u/favorites'?'bookmark':null;
     var parts=location.pathname.split('/').filter(Boolean);
     if(parts[parts.length-1]==='likes'&&(parts.length===2||(parts[0]==='i'&&parts[1]==='history')))return 'like';
     if(parts[0]==='i'&&parts[1]==='bookmarks')return 'bookmark';
